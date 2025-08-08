@@ -54,20 +54,22 @@ class AutoTelegramSender:
 
         return True
 
-    def mark_number_as_processed(self, phone_number):
-        """Отмечает номер как обработанный, добавляя '+' после него"""
+    def mark_number_as_processed(self, phone_number, is_banned=False):
+        """Отмечает номер как обработанный, добавляя '+' или 'ban' после него"""
         try:
             with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
                 lines = file.readlines()
 
             with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
                 for line in lines:
-                    if phone_number in line and not line.strip().endswith('+'):
-                        # Добавляем '+' после номера
-                        line = line.strip() + ' +\n'
+                    if phone_number in line:
+                        if is_banned:
+                            line = line.strip() + ' (BAN) +\n'
+                        elif not line.strip().endswith('+'):
+                            line = line.strip() + ' +\n'
                     file.write(line)
 
-            print(f"✅ Номер {phone_number} отмечен как обработанный")
+            print(f"✅ Номер {phone_number} отмечен как обработанный" + (" (BAN)" if is_banned else ""))
         except Exception as e:
             print(f"❌ Ошибка при отметке номера {phone_number}: {e}")
 
@@ -455,6 +457,21 @@ class AutoTelegramSender:
             print(f"❌ Ошибка при очистке папки {phone_number}: {e}")
             return False
 
+    def is_number_banned(self, phone_number):
+        """Проверяет, забанен ли номер (имеет ли статус BR - BAN)"""
+        try:
+            phone_without_plus = phone_number.replace('+', '')
+            # Ищем карточку с номером
+            card_body = self.driver.find_element(By.XPATH,
+                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_without_plus}')]")
+
+            # Проверяем наличие блока с BR - BAN
+            ban_element = card_body.find_element(By.XPATH,
+                                                 ".//h6[contains(@class, 'mb-1') and contains(., 'BR - BAN')]")
+            return True
+        except:
+            return False
+
     def process_all_numbers(self):
         """Обработка всех номеров телефонов"""
         if not self.read_phone_numbers():
@@ -480,6 +497,12 @@ class AutoTelegramSender:
                     failed_processes += 1
                     continue
                 last_page = page_number
+
+            # Проверяем, не забанен ли номер
+            if self.is_number_banned(phone_number):
+                print(f"⚠️ Номер {phone_number} забанен (BR - BAN), пропускаем")
+                self.mark_number_as_processed(phone_number)  # Помечаем как обработанный
+                continue
 
             # Открываем Telegram с номером
             if not self.open_telegram_with_number(phone_number):

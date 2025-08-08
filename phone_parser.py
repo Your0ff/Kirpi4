@@ -87,7 +87,7 @@ class PhoneNumberParser:
         json_path = os.path.join('data', 'parsing_results.json')
         with open(txt_path, 'w', encoding='utf-8') as f:
             total = len(phone_numbers)
-            page = 1
+            page = START_PAGE
             for i, number in enumerate(phone_numbers, 1):
                 if (i - 1) % phones_per_page == 0:
                     if i != 1:
