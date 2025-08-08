@@ -324,7 +324,7 @@ class AutoTelegramSender:
         except Exception as e:
             print(f"❌ Ошибка при отметке номера {phone_number} как 'nocode': {e}")
 
-    def copy_otp_code_with_retry(self, phone_number, max_attempts=5):
+    def copy_otp_code_with_retry(self, phone_number, max_attempts=10):
         """Копирование OTP кода с повторными попытками и вставка в Telegram"""
         for attempt in range(1, max_attempts + 1):
             try:
