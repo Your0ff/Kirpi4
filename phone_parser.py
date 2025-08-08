@@ -13,20 +13,20 @@ class PhoneNumberParser:
     def __init__(self):
         """Инициализация парсера с настройкой Selenium"""
         self.setup_driver()
-        
+
     def setup_driver(self):
         """Настройка Chrome WebDriver"""
         chrome_options = Options()
-        
+
         # Настройка фонового режима из конфигурации
         if HEADLESS_MODE:
             chrome_options.add_argument("--headless")
-        
+
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
-        
+
         # Автоматическая установка ChromeDriver
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
