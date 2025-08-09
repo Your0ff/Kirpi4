@@ -12,7 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, START_PAGE
+from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, START_PAGE, HEADLESS_MODE
 import pygetwindow as gw
 
 PHONE_NUMBERS_FILE = os.path.join('data', 'phone_numbers.txt')
@@ -32,6 +32,10 @@ class AutoTelegramSender:
     def setup_driver(self):
         """Настройка Chrome WebDriver для автоматизации сайта"""
         chrome_options = Options()
+
+        if HEADLESS_MODE:
+            chrome_options.add_argument("--headless")
+
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
