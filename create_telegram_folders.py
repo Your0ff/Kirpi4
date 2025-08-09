@@ -1,21 +1,14 @@
 import os
 import shutil
 
+from config import base_path, telegram_exe_path
+
+
 def create_folders_and_copy_telegram():
     """
     Создает папки с названиями номеров телефонов и копирует туда Telegram
     """
-    
-    # ============================================
-    # НАСТРОЙКИ - ИЗМЕНИТЕ ПУТИ ПОД СВОЮ СИСТЕМУ
-    # ============================================
-    
-    # Путь к папке, где будут создаваться папки с номерами
-    base_path = r"D:\rega"  # ИЗМЕНИТЕ НА СВОЙ ПУТЬ
-    
-    # Путь к файлу Telegram.exe
-    telegram_exe_path = r"C:\Users\mrily\Desktop\main_telegram\Telegram.exe"  # ИЗМЕНИТЕ НА СВОЙ ПУТЬ
-    
+
     # Файл с номерами телефонов (создается парсером)
     phone_numbers_file = os.path.join('data', 'phone_numbers.txt')
     

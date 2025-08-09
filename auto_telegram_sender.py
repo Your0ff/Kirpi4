@@ -12,7 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, START_PAGE, HEADLESS_MODE
+from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, START_PAGE, HEADLESS_MODE, base_path
 import pygetwindow as gw
 
 PHONE_NUMBERS_FILE = os.path.join('data', 'phone_numbers.txt')
@@ -25,7 +25,7 @@ class AutoTelegramSender:
         """Инициализация автоматического отправителя Telegram"""
         self.phone_numbers = []
         self.current_page = 1
-        self.base_path = r"D:\rega"  # Путь к папкам с номерами
+        self.base_path = base_path
         self.driver = None
         self.setup_driver()
 
