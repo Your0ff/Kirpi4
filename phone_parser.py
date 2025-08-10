@@ -1,4 +1,7 @@
 import time
+import json
+import os
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -30,7 +33,7 @@ class PhoneNumberParser:
         # Автоматическая установка ChromeDriver
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        
+
     def login(self):
         self.driver.get("https://secondtg.org/login")
         try:
@@ -56,7 +59,6 @@ class PhoneNumberParser:
             return False
 
     def parse_all_pages(self):
-        import time
         all_phone_numbers = []
         for page_num in range(START_PAGE, END_PAGE + 1):
             page_url = f"{BASE_URL}?page={page_num}"
@@ -69,7 +71,6 @@ class PhoneNumberParser:
         return all_phone_numbers
 
     def extract_phone_numbers(self, html_content):
-        import re
         phone_numbers = []
         pattern = r'\+55[0-9\s\-\(\)\.]+'
         for match in re.finditer(pattern, html_content):
@@ -80,8 +81,6 @@ class PhoneNumberParser:
         return phone_numbers
 
     def save_results(self, phone_numbers, phones_per_page=15):
-        import json
-        import os
         os.makedirs('data', exist_ok=True)
         txt_path = os.path.join('data', 'phone_numbers.txt')
         json_path = os.path.join('data', 'parsing_results.json')
@@ -111,7 +110,6 @@ def main():
             return
         # После логина сразу переходим на первую страницу orders
         parser.driver.get(f"{BASE_URL}?page={START_PAGE}")
-        import time
         time.sleep(PAGE_DELAY)
         phone_numbers = parser.parse_all_pages()
         print(f"Всего номеров найдено: {len(phone_numbers)}")
@@ -119,5 +117,6 @@ def main():
     finally:
         parser.close()
 
+
 if __name__ == "__main__":
-    main() 
+    main()

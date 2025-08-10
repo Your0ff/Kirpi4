@@ -12,10 +12,26 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, HEADLESS_MODE, base_path
+from enum import Enum
 
+# Используем PHONE_NUMBERS_FILE из config.py
 PHONE_NUMBERS_FILE = os.path.join('data', 'phone_numbers.txt')
 if not os.path.exists('data'):
     os.makedirs('data', exist_ok=True)
+
+# Константы для таймингов
+WAIT_AFTER_OTP_REQUEST = 7
+WAIT_BETWEEN_KEYSTROKES = 0.8
+WAIT_FOR_TELEGRAM_WINDOW = 15
+WAIT_COPY_OTP_ATTEMPTS = 10
+
+
+class PhoneStatus(Enum):
+    """Статусы обработки номеров телефонов"""
+    UNPROCESSED = ""
+    PROCESSED = "+"
+    BANNED = "- BAN"
+    NO_CODE = "- nocode"
 
 
 class AutoTelegramSender:
@@ -56,37 +72,45 @@ class AutoTelegramSender:
 
         return True
 
-    def mark_number_as_processed(self, phone_number):
-        """Отмечает номер как обработанный, добавляя '+' после него"""
+    def update_phone_status(self, phone_number, status: PhoneStatus):
+        """Универсальный метод для обновления статуса номера"""
         try:
             with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
                 lines = file.readlines()
 
             with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
                 for line in lines:
-                    if phone_number in line and not line.strip().endswith('+'):
-                        line = line.strip() + ' +\n'
+                    if phone_number in line:
+                        # Убираем существующие статусы
+                        clean_line = line.strip()
+                        for existing_status in PhoneStatus:
+                            if existing_status.value and existing_status.value in clean_line:
+                                clean_line = clean_line.replace(existing_status.value, '').strip()
+
+                        # Добавляем новый статус
+                        if status.value:
+                            line = clean_line + ' ' + status.value + '\n'
+                        else:
+                            line = clean_line + '\n'
                     file.write(line)
 
-            print(f"✅ Номер {phone_number} отмечен как обработанный")
+            status_name = {
+                PhoneStatus.PROCESSED: "обработанным",
+                PhoneStatus.BANNED: "забаненным",
+                PhoneStatus.NO_CODE: "без кода"
+            }.get(status, "обновленным")
+
+            print(f"✅ Номер {phone_number} отмечен как {status_name}")
         except Exception as e:
-            print(f"❌ Ошибка при отметке номера {phone_number}: {e}")
+            print(f"❌ Ошибка при обновлении статуса номера {phone_number}: {e}")
+
+    def mark_number_as_processed(self, phone_number):
+        """Отмечает номер как обработанный"""
+        self.update_phone_status(phone_number, PhoneStatus.PROCESSED)
 
     def mark_number_as_banned(self, phone_number):
-        """Отмечает номер как забаненный, добавляя '- BAN' после него"""
-        try:
-            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-
-            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
-                for line in lines:
-                    if phone_number in line and not ('- BAN' in line):
-                        line = line.strip() + ' - BAN\n'
-                    file.write(line)
-
-            print(f"⚠️ Номер {phone_number} отмечен как забаненный (- BAN)")
-        except Exception as e:
-            print(f"❌ Ошибка при отметке номера {phone_number} как забаненного: {e}")
+        """Отмечает номер как забаненный"""
+        self.update_phone_status(phone_number, PhoneStatus.BANNED)
 
     def is_number_processed(self, line):
         """Проверяет, был ли номер уже обработан (есть ли '+' в конце строки)"""
@@ -200,7 +224,7 @@ class AutoTelegramSender:
             return False
 
     @staticmethod
-    def wait_for_telegram_window(timeout=15):
+    def wait_for_telegram_window(timeout=WAIT_FOR_TELEGRAM_WINDOW):
         import pygetwindow as gw
         import time
         start_time = time.time()
@@ -228,9 +252,9 @@ class AutoTelegramSender:
             time.sleep(2)
             # Нажимаем Enter 2 раза
             pyautogui.press('enter')
-            time.sleep(0.8)
+            time.sleep(WAIT_BETWEEN_KEYSTROKES)
             pyautogui.press('enter')
-            time.sleep(0.8)
+            time.sleep(WAIT_BETWEEN_KEYSTROKES)
             # Нажимаем Backspace 3 раза
             pyautogui.press('backspace')
             time.sleep(0.1)
@@ -317,7 +341,7 @@ class AutoTelegramSender:
             # Нажимаем кнопку
             request_otp_button.click()
             print(f"✅ Кнопка Request OTP нажата для номера {phone_number}")
-            time.sleep(7)
+            time.sleep(WAIT_AFTER_OTP_REQUEST)
             return True
 
         except Exception as e:
@@ -325,20 +349,10 @@ class AutoTelegramSender:
             return False
 
     def mark_number_as_nocode(self, phone_number):
-        """Отмечает номер как не получивший код, добавляя '- nocode' после него"""
-        try:
-            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
-                for line in lines:
-                    if phone_number in line and not ('- nocode' in line):
-                        line = line.strip() + ' - nocode\n'
-                    file.write(line)
-            print(f"⚠️ Номер {phone_number} отмечен как 'nocode'")
-        except Exception as e:
-            print(f"❌ Ошибка при отметке номера {phone_number} как 'nocode': {e}")
+        """Отмечает номер как не получивший код"""
+        self.update_phone_status(phone_number, PhoneStatus.NO_CODE)
 
-    def copy_otp_code_with_retry(self, phone_number, max_attempts=10):
+    def copy_otp_code_with_retry(self, phone_number, max_attempts=WAIT_COPY_OTP_ATTEMPTS):
         """Копирование OTP кода с повторными попытками и вставка в Telegram"""
         for attempt in range(1, max_attempts + 1):
             try:
@@ -398,7 +412,7 @@ class AutoTelegramSender:
             time.sleep(0.8)
             # Нажимаем Ctrl+F для поиска
             pyautogui.hotkey('ctrl', 'f')
-            time.sleep(0.8)
+            time.sleep(WAIT_BETWEEN_KEYSTROKES)
 
             # Вводим "sec" для поиска группы
             pyautogui.write("sec")

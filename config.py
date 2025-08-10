@@ -20,8 +20,6 @@ END_PAGE = 1   # Конечная страница (включительно)
 HEADLESS_MODE = False  # True для фонового режима, False для видимого браузера
 
 # Таймауты (в секундах)
-PAGE_LOAD_TIMEOUT = 10
-DYNAMIC_CONTENT_WAIT = 5
 PAGE_DELAY = 1  # Задержка между страницами
 
 # Фильтр для номеров телефонов
