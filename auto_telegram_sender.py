@@ -3,7 +3,6 @@ import time
 import subprocess
 import pyautogui
 import pyperclip
-import json
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -226,19 +225,43 @@ class AutoTelegramSender:
     @staticmethod
     def wait_for_telegram_window(timeout=WAIT_FOR_TELEGRAM_WINDOW):
         import pygetwindow as gw
-        import time
         start_time = time.time()
+
         while time.time() - start_time < timeout:
-            windows = gw.getWindowsWithTitle('Telegram')
-            if windows:
-                # Дополнительная задержка и повторная проверка
-                time.sleep(2)
-                windows2 = gw.getWindowsWithTitle('Telegram')
-                if windows2:
+            try:
+                # Получаем все окна и фильтруем их
+                all_windows = gw.getAllWindows()
+                telegram_windows = []
+
+                for window in all_windows:
+                    title = window.title
+                    title_lower = title.lower()
+
+                    # Проверяем, что это настоящее окно Telegram
+                    if (title in ['Telegram', 'Telegram Desktop'] and
+                            # Исключаем окна с названиями файлов
+                            'auto_telegram_sender.py' not in title and
+                            '.py' not in title_lower and
+                            ' – ' not in title and
+                            ' - ' not in title and
+                            window.width > 300 and
+                            window.height > 200 and
+                            not window.isMinimized):
+                        telegram_windows.append(window)
+
+                if telegram_windows:
+                    # Берем первое подходящее окно
+                    window = telegram_windows[0]
+                    print(f"✅ Окно Telegram найдено: {window.title}")
                     return True
-                else:
-                    return False
-            time.sleep(2)
+
+                time.sleep(0.5)
+
+            except Exception as e:
+                print(f"⚠️ Ошибка при поиске окна Telegram: {e}")
+                time.sleep(1)
+
+        print(f"❌ Окно Telegram не найдено за {timeout} секунд")
         return False
 
     def enter_phone_number(self, phone_number):
@@ -317,7 +340,7 @@ class AutoTelegramSender:
                     time.sleep(2)
 
                 except Exception as e:
-                    print(f"⚠️ Попытка {attempt}: Ошибка при переходе: {str(e)}")
+                    print(f"⚠️ Попытка {attempt}: Не удалось перейти на страницу {page_number}")
                     time.sleep(2)
 
             print(f"❌ Не удалось перейти на страницу {page_number} после {max_attempts} попыток")
@@ -345,7 +368,7 @@ class AutoTelegramSender:
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка при поиске Request OTP для {phone_number}: {e}")
+            print(f"❌ Не удалось найти кнопку Request OTP для {phone_number}")
             return False
 
     def mark_number_as_nocode(self, phone_number):
@@ -380,6 +403,7 @@ class AutoTelegramSender:
                         return otp_code
                     else:
                         if attempt < max_attempts:
+                            print(f"⏳ Ожидание OTP кода (попытка {attempt}/{max_attempts})")
                             time.sleep(3)
                             continue
                         else:
@@ -387,12 +411,15 @@ class AutoTelegramSender:
                             return None
                 else:
                     if attempt < max_attempts:
+                        print(f"⏳ Кнопка копирования недоступна (попытка {attempt}/{max_attempts})")
                         time.sleep(3)
                         continue
                     else:
+                        print(f"❌ Кнопка копирования OTP не найдена для номера {phone_number}")
                         return None
             except Exception as e:
-                print(f"❌ Ошибка при копировании OTP для {phone_number} (попытка {attempt}): {e}")
+                # Упрощенный вывод ошибки без stacktrace
+                print(f"❌ Ошибка при копировании OTP для {phone_number} (попытка {attempt}/{max_attempts})")
                 if attempt < max_attempts:
                     time.sleep(3)
                     continue
@@ -496,6 +523,7 @@ class AutoTelegramSender:
                                                  ".//h6[contains(@class, 'mb-1') and contains(., 'BR - BAN')]")
             return True
         except:
+            # Номер не забанен, возвращаем False без вывода ошибки
             return False
 
     def process_all_numbers(self):
@@ -569,7 +597,6 @@ class AutoTelegramSender:
             self.clean_number_folder(phone_number)  # Потом чистим папку
             otp_codes[phone_number] = otp_code
             successful_processes += 1
-            print(f"✅ Успешно обработан номер {i}: {phone_number} (OTP: {otp_code})")
             self.mark_number_as_processed(phone_number)
             time.sleep(1)
 
@@ -583,19 +610,11 @@ class AutoTelegramSender:
         print(f"❌ Ошибок: {failed_processes}")
         print(f"📊 Всего обработано: {len(self.phone_numbers)}")
 
-        # Сохраняем отчет
-        report = {
-            "total_numbers": len(self.phone_numbers),
-            "successful_processes": successful_processes,
-            "failed_processes": failed_processes,
-            "banned_processes": banned_processes,  # Добавляем счетчик забаненных
-            "otp_codes": otp_codes,
-            "phone_numbers": self.phone_numbers,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-        with open("telegram_otp_report.json", 'w', encoding='utf-8') as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
+        # Выводим полученные OTP коды в консоль
+        if otp_codes:
+            print(f"\n📋 Полученные OTP коды:")
+            for phone, code in otp_codes.items():
+                print(f"  {phone}: {code}")
 
     def close(self):
         """Закрытие браузера и очистка"""

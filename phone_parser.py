@@ -83,7 +83,6 @@ class PhoneNumberParser:
     def save_results(self, phone_numbers, phones_per_page=15):
         os.makedirs('data', exist_ok=True)
         txt_path = os.path.join('data', 'phone_numbers.txt')
-        json_path = os.path.join('data', 'parsing_results.json')
         with open(txt_path, 'w', encoding='utf-8') as f:
             total = len(phone_numbers)
             page = START_PAGE
@@ -94,9 +93,7 @@ class PhoneNumberParser:
                     f.write(f"=== Страница {page} ===\n")
                     page += 1
                 f.write(f"{i}. {number}\n")
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(phone_numbers, f, ensure_ascii=False, indent=2)
-        print(f"✅ Результаты сохранены в {txt_path} и {json_path}")
+        print(f"✅ Результаты сохранены в {txt_path}")
 
     def close(self):
         if self.driver:
