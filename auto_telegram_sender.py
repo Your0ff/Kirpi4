@@ -58,25 +58,6 @@ class AutoTelegramSender:
 
         return True
 
-    def mark_number_as_processed(self, phone_number, is_banned=False):
-        """Отмечает номер как обработанный, добавляя '+' или 'ban' после него"""
-        try:
-            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-
-            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
-                for line in lines:
-                    if phone_number in line:
-                        if is_banned:
-                            line = line.strip() + ' (BAN) +\n'
-                        elif not line.strip().endswith('+'):
-                            line = line.strip() + ' +\n'
-                    file.write(line)
-
-            print(f"✅ Номер {phone_number} отмечен как обработанный" + (" (BAN)" if is_banned else ""))
-        except Exception as e:
-            print(f"❌ Ошибка при отметке номера {phone_number}: {e}")
-
     def is_number_processed(self, line):
         """Проверяет, был ли номер уже обработан (есть ли '+' в конце строки)"""
         return line.strip().endswith('+')
@@ -261,7 +242,7 @@ class AutoTelegramSender:
                         # Ищем любой элемент, уникальный для этой страницы (например, первый номер телефона)
                         phone_element = WebDriverWait(self.driver, 5).until(
                             EC.presence_of_element_located((By.XPATH,
-                                                            f"//div[contains(@class, 'card-body') and contains(., '{self.phone_numbers[0]['number'].replace('+', '')}')]"))
+                                                            f"//div[contains(@class, 'card-body') and contains(., '{self.phone_numbers[0]['number']}')]"))
                         )
                         print(f"✅ Успешно перешли на страницу {page_number} (по содержимому)")
                         return True
@@ -295,10 +276,9 @@ class AutoTelegramSender:
     def find_and_click_request_otp(self, phone_number):
         """Поиск и нажатие кнопки Request OTP для конкретного номера"""
         try:
-            # Ищем card-body с номером телефона
-            phone_without_plus = phone_number.replace('+', '')
+            # Ищем card-body с номером телефона (номер отображается с +)
             card_body = self.driver.find_element(By.XPATH,
-                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_without_plus}')]")
+                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
 
             # Ищем кнопку Request OTP внутри этого card-body
             request_otp_button = card_body.find_element(By.XPATH,
@@ -328,14 +308,45 @@ class AutoTelegramSender:
         except Exception as e:
             print(f"❌ Ошибка при отметке номера {phone_number} как 'nocode': {e}")
 
+    def mark_number_as_processed(self, phone_number):
+        """Отмечает номер как обработанный, добавляя '+' после него"""
+        try:
+            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
+                for line in lines:
+                    if phone_number in line and not line.strip().endswith('+'):
+                        line = line.strip() + ' +\n'
+                    file.write(line)
+
+            print(f"✅ Номер {phone_number} отмечен как обработанный")
+        except Exception as e:
+            print(f"❌ Ошибка при отметке номера {phone_number}: {e}")
+
+    def mark_number_as_banned(self, phone_number):
+        """Отмечает номер как забаненный, добавляя '- BAN' после него"""
+        try:
+            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
+                for line in lines:
+                    if phone_number in line and not ('- BAN' in line):
+                        line = line.strip() + ' - BAN\n'
+                    file.write(line)
+
+            print(f"⚠️ Номер {phone_number} отмечен как забаненный (- BAN)")
+        except Exception as e:
+            print(f"❌ Ошибка при отметке номера {phone_number} как забаненного: {e}")
+
     def copy_otp_code_with_retry(self, phone_number, max_attempts=10):
         """Копирование OTP кода с повторными попытками и вставка в Telegram"""
         for attempt in range(1, max_attempts + 1):
             try:
-                # Ищем card-body с номером телефона
-                phone_without_plus = phone_number.replace('+', '')
+                # Ищем card-body с номером телефона (номер отображается с +)
                 card_body = self.driver.find_element(By.XPATH,
-                                                     f"//div[contains(@class, 'card-body') and contains(., '{phone_without_plus}')]")
+                                                     f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
                 # Ищем третью кнопку копирования (для OTP)
                 copy_buttons = card_body.find_elements(By.XPATH,
                                                        ".//i[contains(@class, 'mdi-content-copy') and contains(@class, 'copy_address')]")
@@ -464,10 +475,9 @@ class AutoTelegramSender:
     def is_number_banned(self, phone_number):
         """Проверяет, забанен ли номер (имеет ли статус BR - BAN)"""
         try:
-            phone_without_plus = phone_number.replace('+', '')
-            # Ищем карточку с номером
+            # Ищем карточку с номером (номер отображается с +)
             card_body = self.driver.find_element(By.XPATH,
-                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_without_plus}')]")
+                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
 
             # Проверяем наличие блока с BR - BAN
             ban_element = card_body.find_element(By.XPATH,
@@ -488,6 +498,7 @@ class AutoTelegramSender:
 
         successful_processes = 0
         failed_processes = 0
+        banned_processes = 0  # Счетчик забаненных номеров
         otp_codes = {}
         last_page = 1
 
@@ -504,8 +515,9 @@ class AutoTelegramSender:
 
             # Проверяем, не забанен ли номер
             if self.is_number_banned(phone_number):
-                print(f"⚠️ Номер {phone_number} забанен (BR - BAN), пропускаем")
-                self.mark_number_as_processed(phone_number)  # Помечаем как обработанный
+                print(f"⚠️ Номер {phone_number} забанен (BR - BAN), отмечаем как '- BAN'")
+                self.mark_number_as_banned(phone_number)  # Используем новый метод
+                banned_processes += 1
                 continue
 
             # Открываем Telegram с номером
@@ -555,6 +567,7 @@ class AutoTelegramSender:
 
         # Результаты
         print(f"✅ Успешно обработано: {successful_processes}")
+        print(f"🚫 Забанено: {banned_processes}")
         print(f"❌ Ошибок: {failed_processes}")
         print(f"📊 Всего обработано: {len(self.phone_numbers)}")
 
@@ -563,6 +576,7 @@ class AutoTelegramSender:
             "total_numbers": len(self.phone_numbers),
             "successful_processes": successful_processes,
             "failed_processes": failed_processes,
+            "banned_processes": banned_processes,  # Добавляем счетчик забаненных
             "otp_codes": otp_codes,
             "phone_numbers": self.phone_numbers,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
