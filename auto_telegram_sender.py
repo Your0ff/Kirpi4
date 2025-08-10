@@ -71,8 +71,8 @@ class AutoTelegramSender:
 
         return True
 
-    def update_phone_status(self, phone_number, status: PhoneStatus):
-        """Универсальный метод для обновления статуса номера"""
+    def update_phone_status(self, phone_number, status: PhoneStatus, otp_code=None):
+        """Универсальный метод для обновления статуса номера и добавления OTP кода"""
         try:
             with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
                 lines = file.readlines()
@@ -86,11 +86,33 @@ class AutoTelegramSender:
                             if existing_status.value and existing_status.value in clean_line:
                                 clean_line = clean_line.replace(existing_status.value, '').strip()
 
-                        # Добавляем новый статус
-                        if status.value:
-                            line = clean_line + ' ' + status.value + '\n'
+                        # Убираем старые OTP коды, если есть
+                        if 'OTP код:' in clean_line:
+                            clean_line = clean_line.split('OTP код:')[0].strip()
+
+                        # Восстанавливаем правильный формат строки
+                        parts = clean_line.split('.')
+                        if len(parts) >= 2:
+                            line_number = parts[0].strip()
+                            # Формируем правильную строку с номером телефона
+                            if phone_number.startswith('+'):
+                                formatted_line = f"{line_number}. {phone_number}"
+                            else:
+                                formatted_line = f"{line_number}. +{phone_number}"
                         else:
-                            line = clean_line + '\n'
+                            formatted_line = clean_line
+
+                        # Добавляем статус и OTP код
+                        if status == PhoneStatus.PROCESSED and otp_code:
+                            line = f"{formatted_line} + OTP код: {otp_code}"
+                        elif status.value:
+                            line = f"{formatted_line} {status.value}"
+                        else:
+                            line = formatted_line
+
+                        line += '\n'
+                    else:
+                        line = line
                     file.write(line)
 
             status_name = {
@@ -103,9 +125,14 @@ class AutoTelegramSender:
         except Exception as e:
             print(f"❌ Ошибка при обновлении статуса номера {phone_number}: {e}")
 
-    def mark_number_as_processed(self, phone_number):
-        """Отмечает номер как обработанный"""
-        self.update_phone_status(phone_number, PhoneStatus.PROCESSED)
+    def mark_number_as_processed(self, phone_number, otp_code=None):
+        """Отмечает номер как обработанный с возможностью добавления OTP кода"""
+        self.update_phone_status(phone_number, PhoneStatus.PROCESSED, otp_code)
+
+    def update_phone_numbers_with_otp(self, otp_codes):
+        """Добавляет OTP коды к уже обработанным номерам в файле"""
+        for phone_number, otp_code in otp_codes.items():
+            self.update_phone_status(phone_number, PhoneStatus.PROCESSED, otp_code)
 
     def mark_number_as_banned(self, phone_number):
         """Отмечает номер как забаненный"""
@@ -270,7 +297,7 @@ class AutoTelegramSender:
             if not self.wait_for_telegram_window():
                 print("❌ Окно Telegram не найдено! Проверьте запуск приложения.")
                 return False
-            time.sleep(2)
+            time.sleep(1)
             # Нажимаем Enter 2 раза
             pyautogui.press('enter')
             time.sleep(WAIT_BETWEEN_KEYSTROKES)
@@ -278,11 +305,11 @@ class AutoTelegramSender:
             time.sleep(WAIT_BETWEEN_KEYSTROKES)
             # Нажимаем Backspace 3 раза
             pyautogui.press('backspace')
-            time.sleep(0.1)
+            time.sleep(0.01)
             pyautogui.press('backspace')
-            time.sleep(0.1)
+            time.sleep(0.01)
             pyautogui.press('backspace')
-            time.sleep(0.1)
+            time.sleep(0.01)
             # Вставляем номер телефона
             pyautogui.write(phone_number)
             pyautogui.press('enter')
@@ -461,13 +488,42 @@ class AutoTelegramSender:
             print(f"⚠️ Ошибка при выходе из группы: {e}")
 
     def close_telegram(self):
-        """Закрытие Telegram"""
+        """Закрытие Telegram с проверкой завершения процесса"""
         try:
             # Закрываем все процессы Telegram
             os.system("taskkill /f /im Telegram.exe >nul 2>&1")
-            time.sleep(1)
+
+            # Ждем завершения процесса
+            max_wait = 10  # Максимум 10 секунд ожидания
+            for i in range(max_wait):
+                # Проверяем, запущен ли еще Telegram
+                result = os.system("tasklist /fi \"imagename eq Telegram.exe\" 2>nul | find /i \"Telegram.exe\" >nul")
+                if result != 0:  # Процесс не найден
+                    print("✅ Telegram успешно закрыт")
+                    return
+                time.sleep(1)
+
+            print("⚠️ Telegram может быть еще запущен, продолжаем...")
+
         except Exception as e:
             print(f"⚠️ Ошибка при закрытии Telegram: {e}")
+
+    def _remove_file_with_retry(self, file_path, max_attempts=5):
+        """Удаление файла с несколькими попытками"""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                os.remove(file_path)
+                return True
+            except PermissionError:
+                if attempt < max_attempts:
+                    time.sleep(0.5)  # Ждем 2 секунды между попытками
+                    continue
+                else:
+                    print(f"⚠️ Не удалось удалить {os.path.basename(file_path)} (файл заблокирован)")
+                    return False
+            except Exception:
+                return False
+        return False
 
     def clean_number_folder(self, phone_number):
         """Очистка папки номера после успешной обработки"""
@@ -487,10 +543,14 @@ class AutoTelegramSender:
             for item in items_to_remove:
                 item_path = os.path.join(folder_path, item)
                 if os.path.isfile(item_path):
-                    try:
-                        os.remove(item_path)
-                    except Exception:
-                        pass
+                    # Для Telegram.exe делаем несколько попыток
+                    if item == "Telegram.exe":
+                        self._remove_file_with_retry(item_path)
+                    else:
+                        try:
+                            os.remove(item_path)
+                        except Exception:
+                            pass
                 elif os.path.isdir(item_path):
                     try:
                         shutil.rmtree(item_path)
@@ -595,7 +655,7 @@ class AutoTelegramSender:
             self.clean_number_folder(phone_number)  # Потом чистим папку
             otp_codes[phone_number] = otp_code
             successful_processes += 1
-            self.mark_number_as_processed(phone_number)
+            self.mark_number_as_processed(phone_number, otp_code)
             time.sleep(1)
 
             # Пауза между номерами
@@ -608,11 +668,7 @@ class AutoTelegramSender:
         print(f"❌ Ошибок: {failed_processes}")
         print(f"📊 Всего обработано: {len(self.phone_numbers)}")
 
-        # Выводим полученные OTP коды в консоль
-        if otp_codes:
-            print(f"\n📋 Полученные OTP коды:")
-            for phone, code in otp_codes.items():
-                print(f"  {phone}: {code}")
+        # OTP коды уже добавлены при обработке каждого номера
 
     def close(self):
         """Закрытие браузера и очистка"""
