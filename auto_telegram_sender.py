@@ -5,15 +5,13 @@ import pyautogui
 import pyperclip
 import json
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, START_PAGE, HEADLESS_MODE, base_path
-import pygetwindow as gw
+from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, HEADLESS_MODE, base_path
 
 PHONE_NUMBERS_FILE = os.path.join('data', 'phone_numbers.txt')
 if not os.path.exists('data'):
@@ -57,6 +55,38 @@ class AutoTelegramSender:
             return False
 
         return True
+
+    def mark_number_as_processed(self, phone_number):
+        """Отмечает номер как обработанный, добавляя '+' после него"""
+        try:
+            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
+                for line in lines:
+                    if phone_number in line and not line.strip().endswith('+'):
+                        line = line.strip() + ' +\n'
+                    file.write(line)
+
+            print(f"✅ Номер {phone_number} отмечен как обработанный")
+        except Exception as e:
+            print(f"❌ Ошибка при отметке номера {phone_number}: {e}")
+
+    def mark_number_as_banned(self, phone_number):
+        """Отмечает номер как забаненный, добавляя '- BAN' после него"""
+        try:
+            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
+                for line in lines:
+                    if phone_number in line and not ('- BAN' in line):
+                        line = line.strip() + ' - BAN\n'
+                    file.write(line)
+
+            print(f"⚠️ Номер {phone_number} отмечен как забаненный (- BAN)")
+        except Exception as e:
+            print(f"❌ Ошибка при отметке номера {phone_number} как забаненного: {e}")
 
     def is_number_processed(self, line):
         """Проверяет, был ли номер уже обработан (есть ли '+' в конце строки)"""
@@ -307,38 +337,6 @@ class AutoTelegramSender:
             print(f"⚠️ Номер {phone_number} отмечен как 'nocode'")
         except Exception as e:
             print(f"❌ Ошибка при отметке номера {phone_number} как 'nocode': {e}")
-
-    def mark_number_as_processed(self, phone_number):
-        """Отмечает номер как обработанный, добавляя '+' после него"""
-        try:
-            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-
-            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
-                for line in lines:
-                    if phone_number in line and not line.strip().endswith('+'):
-                        line = line.strip() + ' +\n'
-                    file.write(line)
-
-            print(f"✅ Номер {phone_number} отмечен как обработанный")
-        except Exception as e:
-            print(f"❌ Ошибка при отметке номера {phone_number}: {e}")
-
-    def mark_number_as_banned(self, phone_number):
-        """Отмечает номер как забаненный, добавляя '- BAN' после него"""
-        try:
-            with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-
-            with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
-                for line in lines:
-                    if phone_number in line and not ('- BAN' in line):
-                        line = line.strip() + ' - BAN\n'
-                    file.write(line)
-
-            print(f"⚠️ Номер {phone_number} отмечен как забаненный (- BAN)")
-        except Exception as e:
-            print(f"❌ Ошибка при отметке номера {phone_number} как забаненного: {e}")
 
     def copy_otp_code_with_retry(self, phone_number, max_attempts=10):
         """Копирование OTP кода с повторными попытками и вставка в Telegram"""

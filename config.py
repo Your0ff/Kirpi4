@@ -28,9 +28,8 @@ PAGE_DELAY = 1  # Задержка между страницами
 PHONE_PREFIX = "+55"  # Префикс для поиска номеров
 MIN_PHONE_LENGTH = 13  # Минимальная длина номера
 
-# Файлы для сохранения результатов
-JSON_OUTPUT_FILE = "parsing_results.json"
-TXT_OUTPUT_FILE = "phone_numbers.txt"
+# Файл для сохранения номеров телефонов
+PHONE_NUMBERS_FILE = "phone_numbers.txt"
 
 # Координаты мыши для автоматизации Telegram
 # Замените на реальные координаты, полученные с помощью get_mouse_position()
