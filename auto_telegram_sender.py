@@ -255,8 +255,6 @@ class AutoTelegramSender:
                     print(f"✅ Окно Telegram найдено: {window.title}")
                     return True
 
-                time.sleep(0.5)
-
             except Exception as e:
                 print(f"⚠️ Ошибка при поиске окна Telegram: {e}")
                 time.sleep(1)
