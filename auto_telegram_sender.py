@@ -1,7 +1,6 @@
 import os
 import time
 import subprocess
-import pyautogui
 import pyperclip
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -10,8 +9,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import EMAIL, PASSWORD, MOUSE_COORDINATES, MOUSE_COORDINATES_lkm, HEADLESS_MODE, base_path
+from config import EMAIL, PASSWORD, HEADLESS_MODE, base_path
 from enum import Enum
+from pynput.keyboard import Key, Controller as KeyboardController
+from pynput import mouse
 
 # Используем PHONE_NUMBERS_FILE из config.py
 PHONE_NUMBERS_FILE = os.path.join('data', 'phone_numbers.txt')
@@ -40,6 +41,11 @@ class AutoTelegramSender:
         self.current_page = 1
         self.base_path = base_path
         self.driver = None
+
+        # Инициализируем контроллеры pynput
+        self.keyboard = KeyboardController()
+        self.mouse_controller = mouse.Controller()
+
         self.setup_driver()
 
     def setup_driver(self):
@@ -139,8 +145,12 @@ class AutoTelegramSender:
         self.update_phone_status(phone_number, PhoneStatus.BANNED)
 
     def is_number_processed(self, line):
-        """Проверяет, был ли номер уже обработан (есть ли '+' в конце строки)"""
-        return line.strip().endswith('+')
+        """Проверяет, был ли номер уже обработан (есть ли '+' в конце строки или '+ OTP код:')"""
+        line = line.strip()
+        return (line.endswith('+') or
+                '+ OTP код:' in line or
+                '- BAN' in line or
+                '- nocode' in line)
 
     def load_unprocessed_numbers(self):
         """Загружает только необработанные номера телефонов"""
@@ -169,7 +179,12 @@ class AutoTelegramSender:
                     if '+55' in line and not self.is_number_processed(line):
                         parts = line.split('.')
                         if len(parts) >= 2:
-                            number = parts[1].strip()
+                            full_number_part = parts[1].strip()
+                            # Извлекаем только номер телефона, убирая OTP часть если есть
+                            number = full_number_part.split(' +')[0] if ' +' in full_number_part else full_number_part
+                            number = number.split(' OTP')[0] if ' OTP' in number else number
+                            number = number.strip()
+
                             if number.startswith('+55'):
                                 unprocessed_numbers.append({
                                     'number': number,
@@ -232,8 +247,12 @@ class AutoTelegramSender:
     def open_telegram_with_number(self, phone_number):
         """Открытие Telegram с конкретным номером"""
         try:
+            # Извлекаем только номер телефона, убирая OTP часть если есть
+            clean_number = phone_number.split(' +')[0] if ' +' in phone_number else phone_number
+            clean_number = clean_number.split(' OTP')[0] if ' OTP' in clean_number else clean_number
+
             # Формируем путь к папке с номером
-            folder_name = phone_number.replace('+', '').replace('-', '').replace(' ', '')
+            folder_name = clean_number.replace('+', '').replace('-', '').replace(' ', '')
             folder_path = os.path.join(self.base_path, folder_name)
             telegram_path = os.path.join(folder_path, "Telegram.exe")
 
@@ -298,21 +317,30 @@ class AutoTelegramSender:
                 print("❌ Окно Telegram не найдено! Проверьте запуск приложения.")
                 return False
             time.sleep(1)
+
             # Нажимаем Enter 2 раза
-            pyautogui.press('enter')
+            self.keyboard.press(Key.enter)
+            self.keyboard.release(Key.enter)
             time.sleep(WAIT_BETWEEN_KEYSTROKES)
-            pyautogui.press('enter')
+            self.keyboard.press(Key.enter)
+            self.keyboard.release(Key.enter)
             time.sleep(WAIT_BETWEEN_KEYSTROKES)
+
             # Нажимаем Backspace 3 раза
-            pyautogui.press('backspace')
+            self.keyboard.press(Key.backspace)
+            self.keyboard.release(Key.backspace)
             time.sleep(0.01)
-            pyautogui.press('backspace')
+            self.keyboard.press(Key.backspace)
+            self.keyboard.release(Key.backspace)
             time.sleep(0.01)
-            pyautogui.press('backspace')
+            self.keyboard.press(Key.backspace)
+            self.keyboard.release(Key.backspace)
             time.sleep(0.01)
-            # Вставляем номер телефона
-            pyautogui.write(phone_number)
-            pyautogui.press('enter')
+
+            # Вводим номер телефона
+            self.keyboard.type(phone_number)
+            self.keyboard.press(Key.enter)
+            self.keyboard.release(Key.enter)
             return True
         except Exception as e:
             print(f"❌ Ошибка при вводе номера {phone_number}: {e}")
@@ -423,7 +451,7 @@ class AutoTelegramSender:
                         if otp_code.strip().lower() == 'nocode':
                             return 'nocode'
                         # Вставляем OTP код в Telegram
-                        pyautogui.write(otp_code)
+                        self.keyboard.type(otp_code)
                         time.sleep(3)
                         return otp_code
                     else:
@@ -451,41 +479,6 @@ class AutoTelegramSender:
                 else:
                     return None
         return None
-
-    def leave_telegram_group(self):
-        """Выход из группы Telegram перед закрытием"""
-
-        # Используем координаты из конфигурации
-        right_click_x, right_click_y = MOUSE_COORDINATES['right_click']
-        left_click_x, left_click_y = MOUSE_COORDINATES['left_click']
-        left_click_x2, left_click_y2 = MOUSE_COORDINATES_lkm['left_click']
-        try:
-            pyautogui.click(left_click_x2, left_click_y2)
-            time.sleep(0.8)
-            # Нажимаем Ctrl+F для поиска
-            pyautogui.hotkey('ctrl', 'f')
-            time.sleep(WAIT_BETWEEN_KEYSTROKES)
-
-            # Вводим "sec" для поиска группы
-            pyautogui.write("sec")
-            time.sleep(0.5)
-
-            # Нажимаем правую кнопку мыши по заданным координатам
-            pyautogui.rightClick(right_click_x, right_click_y)
-            time.sleep(0.5)
-
-            # Нажимаем левую кнопку мыши по заданным координатам для выбора "Выйти из группы"
-            pyautogui.click(left_click_x, left_click_y)
-            time.sleep(0.5)
-
-            pyautogui.press('enter')
-            time.sleep(0.5)
-
-            pyautogui.press('enter')
-            time.sleep(0.5)
-
-        except Exception as e:
-            print(f"⚠️ Ошибка при выходе из группы: {e}")
 
     def close_telegram(self):
         """Закрытие Telegram с проверкой завершения процесса"""
@@ -529,8 +522,12 @@ class AutoTelegramSender:
         """Очистка папки номера после успешной обработки"""
         try:
             import shutil
+            # Извлекаем только номер телефона, убирая OTP часть если есть
+            clean_number = phone_number.split(' +')[0] if ' +' in phone_number else phone_number
+            clean_number = clean_number.split(' OTP')[0] if ' OTP' in clean_number else clean_number
+
             # Формируем путь к папке с номером
-            folder_name = phone_number.replace('+', '').replace('-', '').replace(' ', '')
+            folder_name = clean_number.replace('+', '').replace('-', '').replace(' ', '')
             folder_path = os.path.join(self.base_path, folder_name)
             if not os.path.exists(folder_path):
                 return False
