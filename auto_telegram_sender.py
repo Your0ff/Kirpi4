@@ -341,6 +341,7 @@ class AutoTelegramSender:
             self.keyboard.type(phone_number)
             self.keyboard.press(Key.enter)
             self.keyboard.release(Key.enter)
+            time.sleep(1)
             return True
         except Exception as e:
             print(f"❌ Ошибка при вводе номера {phone_number}: {e}")
