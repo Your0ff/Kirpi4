@@ -316,7 +316,7 @@ class AutoTelegramSender:
             if not self.wait_for_telegram_window():
                 print("❌ Окно Telegram не найдено! Проверьте запуск приложения.")
                 return False
-            time.sleep(1)
+            time.sleep(2)  # Увеличили с 1 до 2 секунд для стабильности
 
             # Нажимаем Enter 2 раза
             self.keyboard.press(Key.enter)
@@ -341,7 +341,6 @@ class AutoTelegramSender:
             self.keyboard.type(phone_number)
             self.keyboard.press(Key.enter)
             self.keyboard.release(Key.enter)
-            time.sleep(1)
             return True
         except Exception as e:
             print(f"❌ Ошибка при вводе номера {phone_number}: {e}")
@@ -429,56 +428,107 @@ class AutoTelegramSender:
         """Отмечает номер как не получивший код"""
         self.update_phone_status(phone_number, PhoneStatus.NO_CODE)
 
-    def copy_otp_code_with_retry(self, phone_number, max_attempts=WAIT_COPY_OTP_ATTEMPTS):
-        """Копирование OTP кода с повторными попытками и вставка в Telegram"""
-        for attempt in range(1, max_attempts + 1):
+    def verify_otp_entered_successfully(self):
+        """Проверяет, был ли OTP код успешно введен в Telegram"""
+        try:
+            import pygetwindow as gw
+            telegram_windows = [w for w in gw.getAllWindows() if
+                                'Telegram' in w.title and w.width > 300 and w.height > 200]
+
+            if telegram_windows:
+                window = telegram_windows[0]
+                # Если заголовок изменился с базового "Telegram", значит OTP принят
+                if window.title != 'Telegram' or 'Telegram Desktop' in window.title:
+                    return True
+
+            return False
+        except Exception as e:
+            print(f"⚠️ Ошибка при проверке статуса OTP: {e}")
+            return False
+
+    def wait_for_otp_acceptance(self, timeout=30):
+        """Ждет подтверждения принятия OTP кода с тайм-аутом"""
+        start_time = time.time()
+        checks_made = 0
+
+        while time.time() - start_time < timeout:
+            checks_made += 1
+            print(f"🔍 Проверка {checks_made}: ожидание принятия OTP...")
+
+            if self.verify_otp_entered_successfully():
+                elapsed_time = time.time() - start_time
+                print(f"✅ OTP принят за {elapsed_time:.1f}с!")
+                return True
+
+            time.sleep(1)  # Проверяем каждую секунду
+
+        print(f"⏰ Тайм-аут после {checks_made} проверок ({timeout}с)")
+        return False
+
+    def copy_otp_code_with_timeout(self, phone_number, timeout=30):
+        """Копирование OTP кода с ожиданием в течение заданного времени"""
+        start_time = time.time()
+        check_count = 0
+
+        print(f"⏳ Ожидание появления OTP кода для {phone_number} (максимум {timeout}с)...")
+
+        while time.time() - start_time < timeout:
+            check_count += 1
+            elapsed_time = time.time() - start_time
+            print(f"🔍 Проверка {check_count}: поиск OTP кода ({elapsed_time:.1f}с)")
+
             try:
                 # Ищем card-body с номером телефона (номер отображается с +)
                 card_body = self.driver.find_element(By.XPATH,
                                                      f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
+
                 # Ищем третью кнопку копирования (для OTP)
                 copy_buttons = card_body.find_elements(By.XPATH,
                                                        ".//i[contains(@class, 'mdi-content-copy') and contains(@class, 'copy_address')]")
+
                 if len(copy_buttons) >= 3:
                     # Берем третью кнопку копирования (для OTP)
                     otp_copy_button = copy_buttons[2]
                     # Кликаем на кнопку копирования OTP
                     otp_copy_button.click()
                     time.sleep(1)
+
                     # Получаем скопированный текст из буфера обмена
                     otp_code = pyperclip.paste()
+
                     if otp_code and len(otp_code) > 0 and otp_code.strip():
-                        print(f"✅ OTP код скопирован: {otp_code}")
+                        print(f"✅ OTP код найден: {otp_code} (через {elapsed_time:.1f}с)")
+
                         if otp_code.strip().lower() == 'nocode':
                             return 'nocode'
+
                         # Вставляем OTP код в Telegram
                         self.keyboard.type(otp_code)
-                        time.sleep(3)
-                        return otp_code
-                    else:
-                        if attempt < max_attempts:
-                            print(f"⏳ Ожидание OTP кода (попытка {attempt}/{max_attempts})")
-                            time.sleep(3)
-                            continue
+                        print(f"📱 OTP код введен в Telegram: {otp_code}")
+
+                        # Ждем подтверждения принятия OTP с тайм-аутом
+                        if self.wait_for_otp_acceptance(timeout=30):
+                            print("✅ OTP успешно принят Telegram!")
+                            return otp_code
                         else:
-                            print(f"❌ OTP код не найден после {max_attempts} попыток для номера {phone_number}")
+                            print("❌ OTP не принят за 30 секунд")
                             return None
-                else:
-                    if attempt < max_attempts:
-                        print(f"⏳ Кнопка копирования недоступна (попытка {attempt}/{max_attempts})")
-                        time.sleep(3)
-                        continue
                     else:
-                        print(f"❌ Кнопка копирования OTP не найдена для номера {phone_number}")
-                        return None
-            except Exception as e:
-                # Упрощенный вывод ошибки без stacktrace
-                print(f"❌ Ошибка при копировании OTP для {phone_number} (попытка {attempt}/{max_attempts})")
-                if attempt < max_attempts:
-                    time.sleep(3)
-                    continue
+                        # OTP код еще не появился, ждем и проверяем снова
+                        time.sleep(1)  # Проверяем каждую секунду
+                        continue
                 else:
-                    return None
+                    # Кнопка копирования недоступна, ждем и проверяем снова
+                    time.sleep(1)
+                    continue
+
+            except Exception as e:
+                # Элемент не найден, ждем и проверяем снова
+                time.sleep(1)
+                continue
+
+        # Время истекло
+        print(f"⏰ Тайм-аут ожидания OTP кода ({timeout}с). Код не появился для номера {phone_number}")
         return None
 
     def close_telegram(self):
@@ -635,7 +685,7 @@ class AutoTelegramSender:
                 time.sleep(1)
                 continue
 
-            otp_code = self.copy_otp_code_with_retry(phone_number)
+            otp_code = self.copy_otp_code_with_timeout(phone_number, timeout=30)
             if otp_code and otp_code.strip().upper() == 'NOCODE':
                 self.mark_number_as_nocode(phone_number)
                 failed_processes += 1
