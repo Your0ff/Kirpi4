@@ -439,6 +439,7 @@ class AutoTelegramSender:
                 window = telegram_windows[0]
                 # Если заголовок изменился с базового "Telegram", значит OTP принят
                 if window.title != 'Telegram' or 'Telegram Desktop' in window.title:
+                    time.sleep(1)
                     return True
 
             return False
