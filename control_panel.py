@@ -4,10 +4,12 @@ import threading
 import queue
 import os
 import time
+import sys
 from datetime import datetime
 import json
 
 # Импорт ваших существующих модулей БЕЗ ИЗМЕНЕНИЙ
+import config
 from auto_telegram_sender import AutoTelegramSender
 from phone_parser import PhoneNumberParser
 from create_telegram_folders import create_folders_and_copy_telegram
@@ -91,6 +93,8 @@ class ExpandableCard(tk.Frame):
             self.content_frame.pack(fill='x', padx=15, pady=(0, 15))
         self.arrow_label.configure(text='▼')
         self.is_expanded = True
+        # Обновляем скролл после изменения размера
+        self.master.after(50, self._update_parent_scroll)
 
     def collapse(self):
         """Сворачивание карточки"""
@@ -98,6 +102,16 @@ class ExpandableCard(tk.Frame):
             self.content_frame.pack_forget()
         self.arrow_label.configure(text='▶')
         self.is_expanded = False
+        # Обновляем скролл после изменения размера
+        self.master.after(50, self._update_parent_scroll)
+
+    def _update_parent_scroll(self):
+        """Обновление скролла левой панели"""
+        # Используем переданную ссылку на главный класс
+        if hasattr(self, '_control_panel'):
+            # Обновляем только левый скролл
+            if hasattr(self._control_panel, 'update_left_scroll'):
+                self._control_panel.update_left_scroll()
 
     def set_content(self, content_frame):
         """Установка контента карточки"""
@@ -290,29 +304,12 @@ class TelegramControlPanel:
                                           bg='#ffffff')
         self.main_status_label.pack(side='left')
 
-        # ==== ОСНОВНОЙ КОНТЕНТ С ПРОКРУТКОЙ ====
-        # Создаем Canvas для прокрутки
-        canvas_frame = tk.Frame(self.root, bg='#f5f5f5')
-        canvas_frame.pack(fill='both', expand=True)
+        # ==== ОСНОВНОЙ КОНТЕНТ БЕЗ ПРОКРУТКИ ====
+        main_content_frame = tk.Frame(self.root, bg='#f5f5f5')
+        main_content_frame.pack(fill='both', expand=True)
 
-        self.main_canvas = tk.Canvas(canvas_frame, bg='#f5f5f5', highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient='vertical', command=self.main_canvas.yview)
-        self.scrollable_frame = tk.Frame(self.main_canvas, bg='#f5f5f5')
-
-        self.scrollable_frame.bind('<Configure>',
-                                   lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox('all')))
-
-        self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor='nw')
-        self.main_canvas.configure(yscrollcommand=scrollbar.set)
-
-        self.main_canvas.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-
-        # Привязываем скролл колесика мыши
-        self.bind_mousewheel()
-
-        # Контент в прокручиваемой области
-        main_content = tk.Frame(self.scrollable_frame, bg='#f5f5f5')
+        # Контент основной области
+        main_content = tk.Frame(main_content_frame, bg='#f5f5f5')
         main_content.pack(fill='both', expand=True, padx=20, pady=15)
 
         # Верхняя панель - статистика
@@ -322,12 +319,56 @@ class TelegramControlPanel:
         content_container = tk.Frame(main_content, bg='#f5f5f5')
         content_container.pack(fill='both', expand=True, pady=(15, 0))
 
-        # Левая колонка - управление (расширяемые карточки)
-        left_column = tk.Frame(content_container, bg='#f5f5f5', width=380)
-        left_column.pack(side='left', fill='both', padx=(0, 15))
-        left_column.pack_propagate(False)
+        # Левая колонка - управление (расширяемые карточки) с отдельным скроллом
+        left_column_container = tk.Frame(content_container, bg='#f5f5f5', width=380)
+        left_column_container.pack(side='left', fill='both', padx=(0, 15))
+        left_column_container.pack_propagate(False)
 
-        self.create_expandable_control_panel(left_column)
+        # Создаем отдельный Canvas со скроллом для левой панели
+        left_canvas = tk.Canvas(left_column_container, bg='#f5f5f5', highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(left_column_container, orient='vertical', command=left_canvas.yview)
+        left_scrollable_frame = tk.Frame(left_canvas, bg='#f5f5f5')
+
+        def configure_left_scroll(event=None):
+            # Обновляем scrollregion для левой панели
+            left_canvas.configure(scrollregion=left_canvas.bbox('all'))
+            # Устанавливаем ширину левого фрейма
+            if event and event.widget == left_canvas:
+                canvas_width = event.width
+                left_canvas.itemconfig(left_canvas_window, width=canvas_width)
+
+        left_scrollable_frame.bind('<Configure>', configure_left_scroll)
+        left_canvas.bind('<Configure>', configure_left_scroll)
+
+        left_canvas_window = left_canvas.create_window((0, 0), window=left_scrollable_frame, anchor='nw')
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+
+        left_canvas.pack(side='left', fill='both', expand=True)
+        left_scrollbar.pack(side='right', fill='y')
+
+        # Привязываем скролл колесика мыши для левой панели
+        def _on_left_mousewheel(event):
+            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+
+        def _bind_to_left_mousewheel(event):
+            # Привязываем левый скролл
+            left_canvas.bind_all('<MouseWheel>', _on_left_mousewheel)
+
+        def _unbind_from_left_mousewheel(event):
+            # Отвязываем левый скролл
+            left_canvas.unbind_all('<MouseWheel>')
+
+        left_canvas.bind('<Enter>', _bind_to_left_mousewheel)
+        left_canvas.bind('<Leave>', _unbind_from_left_mousewheel)
+
+        # Функция для обновления скролла левой панели
+        def update_left_scroll():
+            left_canvas.update_idletasks()
+            configure_left_scroll()
+
+        self.update_left_scroll = update_left_scroll
+
+        self.create_expandable_control_panel(left_scrollable_frame)
 
         # Правая колонка - мониторинг
         right_column = tk.Frame(content_container, bg='#f5f5f5')
@@ -360,21 +401,6 @@ class TelegramControlPanel:
                                    bg='#ffffff')
         self.time_label.pack(side='right')
         self.update_time()
-
-    def bind_mousewheel(self):
-        """Привязка прокрутки колесом мыши"""
-
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
-
-        def _bind_to_mousewheel(event):
-            self.main_canvas.bind_all('<MouseWheel>', _on_mousewheel)
-
-        def _unbind_from_mousewheel(event):
-            self.main_canvas.unbind_all('<MouseWheel>')
-
-        self.main_canvas.bind('<Enter>', _bind_to_mousewheel)
-        self.main_canvas.bind('<Leave>', _unbind_from_mousewheel)
 
     def create_stats_panel(self, parent):
         """Создание панели статистики с закругленными карточками"""
@@ -434,6 +460,7 @@ class TelegramControlPanel:
 
         # === КАРТОЧКА ПАРСИНГА ===
         parsing_card = ExpandableCard(parent, "📱 Парсинг номеров", bg=self.colors['background'])
+        parsing_card._control_panel = self  # Передаем ссылку на главный класс
         parsing_card.pack(fill='x', pady=(0, 10))
 
         # Контент парсинга
@@ -447,24 +474,42 @@ class TelegramControlPanel:
                                                      self.start_parsing, 'primary')
         start_parse_btn.pack(fill='x')
 
-        btn_frame2 = tk.Frame(parsing_content, bg=self.colors['background'])
-        btn_frame2.pack(fill='x', pady=3)
-
-        stop_parse_btn = self.create_rounded_button(btn_frame2, "⏹️ Остановить парсер",
-                                                    self.stop_parsing, 'warning')
-        stop_parse_btn.pack(fill='x')
-
         btn_frame3 = tk.Frame(parsing_content, bg=self.colors['background'])
         btn_frame3.pack(fill='x', pady=3)
 
-        create_folders_btn = self.create_rounded_button(btn_frame3, "📁 Создать папки",
-                                                        self.create_folders, 'success')
-        create_folders_btn.pack(fill='x')
+        show_numbers_btn = self.create_rounded_button(btn_frame3, "📋 Показать номера",
+                                                      self.show_numbers, 'secondary')
+        show_numbers_btn.pack(fill='x')
 
         parsing_card.set_content(parsing_content)
 
+        # === КАРТОЧКА СОЗДАНИЯ ПАПОК ===
+        folders_card = ExpandableCard(parent, "📁 Создание папок", bg=self.colors['background'])
+        folders_card._control_panel = self  # Передаем ссылку на главный класс
+        folders_card.pack(fill='x', pady=(0, 10))
+
+        # Контент создания папок
+        folders_content = tk.Frame(folders_card, bg=self.colors['background'])
+
+        btn_frame_folders1 = tk.Frame(folders_content, bg=self.colors['background'])
+        btn_frame_folders1.pack(fill='x', pady=3)
+
+        create_folders_btn = self.create_rounded_button(btn_frame_folders1, "📁 Создать папки",
+                                                        self.create_folders, 'success')
+        create_folders_btn.pack(fill='x')
+
+        btn_frame_folders2 = tk.Frame(folders_content, bg=self.colors['background'])
+        btn_frame_folders2.pack(fill='x', pady=3)
+
+        open_folder_btn = self.create_rounded_button(btn_frame_folders2, "🗂️ Открыть базовую папку",
+                                                     self.open_base_folder, 'secondary')
+        open_folder_btn.pack(fill='x')
+
+        folders_card.set_content(folders_content)
+
         # === КАРТОЧКА ОБРАБОТКИ ===
         processing_card = ExpandableCard(parent, "🤖 Обработка номеров", bg=self.colors['background'])
+        processing_card._control_panel = self  # Передаем ссылку на главный класс
         processing_card.pack(fill='x', pady=(0, 10))
 
         # Контент обработки
@@ -500,19 +545,17 @@ class TelegramControlPanel:
 
         processing_card.set_content(processing_content)
 
+        # Обновляем левый скролл после создания всех карточек
+        if hasattr(self, 'update_left_scroll'):
+            self.root.after(150, self.update_left_scroll)
+
         # === КАРТОЧКА УПРАВЛЕНИЯ ФАЙЛАМИ ===
         files_card = ExpandableCard(parent, "📂 Управление данными", bg=self.colors['background'])
+        files_card._control_panel = self  # Передаем ссылку на главный класс
         files_card.pack(fill='x', pady=(0, 10))
 
         # Контент файлов
         files_content = tk.Frame(files_card, bg=self.colors['background'])
-
-        btn_frame8 = tk.Frame(files_content, bg=self.colors['background'])
-        btn_frame8.pack(fill='x', pady=3)
-
-        show_numbers_btn = self.create_rounded_button(btn_frame8, "📋 Показать номера",
-                                                      self.show_numbers, 'secondary')
-        show_numbers_btn.pack(fill='x')
 
         btn_frame9 = tk.Frame(files_content, bg=self.colors['background'])
         btn_frame9.pack(fill='x', pady=3)
@@ -539,6 +582,10 @@ class TelegramControlPanel:
 
         # По умолчанию раскрываем первую карточку
         parsing_card.expand()
+
+        # Финальное обновление левого скролла после создания всего интерфейса
+        if hasattr(self, 'update_left_scroll'):
+            self.root.after(250, self.update_left_scroll)
 
     def create_rounded_button(self, parent, text, command, style='primary'):
         """Создание стилизованной кнопки с закруглениями"""
@@ -790,9 +837,13 @@ class TelegramControlPanel:
 
                 self.parser = PhoneNumberParser()
 
-                # Авторизация
+                # Получаем актуальные настройки из конфига
+                start_page = getattr(config, 'START_PAGE', 1)
+                end_page = getattr(config, 'END_PAGE', 10)
+
+                # Авторизация с передачей стартовой страницы
                 self.log_message("Выполняется авторизация...", 'INFO')
-                if not self.parser.login():
+                if not self.parser.login(start_page):
                     self.log_message("Ошибка авторизации!", 'ERROR')
                     self.update_status("Ошибка авторизации", 'ERROR')
                     return
@@ -800,8 +851,8 @@ class TelegramControlPanel:
                 self.log_message("Авторизация успешна!", 'SUCCESS')
 
                 # Парсинг
-                self.log_message(f"Парсинг страниц {START_PAGE}-{END_PAGE}...", 'INFO')
-                phone_numbers = self.parser.parse_all_pages()
+                self.log_message(f"Парсинг страниц {start_page}-{end_page}...", 'INFO')
+                phone_numbers = self.parser.parse_all_pages(start_page, end_page)
 
                 # Сохранение
                 self.log_message("Сохранение результатов...", 'INFO')
@@ -854,6 +905,36 @@ class TelegramControlPanel:
                 self.update_status("Ошибка создания папок", 'ERROR')
 
         threading.Thread(target=create_thread, daemon=True).start()
+
+    def open_base_folder(self):
+        """Открытие базовой папки с номерами"""
+        try:
+            import subprocess
+            import platform
+
+            # Получаем путь из конфига
+            folder_path = getattr(config, 'base_path', 'C:\\Users\\')
+
+            # Проверяем существование папки
+            if not os.path.exists(folder_path):
+                messagebox.showerror("Ошибка", f"Папка не найдена:\n{folder_path}")
+                self.log_message(f"Базовая папка не найдена: {folder_path}", 'ERROR')
+                return
+
+            # Открываем папку в зависимости от ОС
+            system = platform.system().lower()
+            if system == 'windows':
+                os.startfile(folder_path)
+            elif system == 'darwin':  # macOS
+                subprocess.Popen(['open', folder_path])
+            else:  # Linux
+                subprocess.Popen(['xdg-open', folder_path])
+
+            self.log_message(f"Открыта базовая папка: {folder_path}", 'INFO')
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось открыть папку:\n{str(e)}")
+            self.log_message(f"Ошибка открытия базовой папки: {str(e)}", 'ERROR')
 
     def start_processing(self):
         """Запуск обработки номеров"""
@@ -953,7 +1034,7 @@ class TelegramControlPanel:
         self.log_message("Статистика сброшена", 'INFO')
 
     def show_numbers(self):
-        """Показ номеров в отдельном окне"""
+        """Показ номеров в отдельном окне с возможностью редактирования"""
         numbers_window = tk.Toplevel(self.root)
         numbers_window.title("📋 Список номеров")
         numbers_window.geometry("900x700")
@@ -964,39 +1045,105 @@ class TelegramControlPanel:
         header.pack(fill='x')
         header.pack_propagate(False)
 
-        title = tk.Label(header, text="📋 Список номеров телефонов",
+        title = tk.Label(header, text="📋 Список номеров телефонов (Редактирование)",
                          font=('Segoe UI', 16, 'bold'),
                          fg=self.colors['primary'],
                          bg='#ffffff')
         title.pack(pady=20)
 
+        # Кнопки управления
+        button_frame = tk.Frame(numbers_window, bg='#f5f5f5')
+        button_frame.pack(fill='x', padx=20, pady=(0, 10))
+
+        def save_numbers():
+            """Сохранение отредактированных номеров"""
+            try:
+                content = text_area.get('1.0', 'end-1c')
+                os.makedirs('data', exist_ok=True)
+                with open(os.path.join('data', 'phone_numbers.txt'), 'w', encoding='utf-8') as f:
+                    f.write(content)
+
+                # Подсчитываем количество номеров
+                import re
+                phone_pattern = r'\+\d{10,15}'
+                phone_numbers = re.findall(phone_pattern, content)
+                total_count = len(phone_numbers)
+
+                # Обновляем статистику
+                self.stats['total'] = total_count
+                self.message_queue.put(('stats',))
+
+                messagebox.showinfo("Успех", f"Номера сохранены успешно!\nВсего номеров: {total_count}")
+                self.log_message(f"Номера телефонов обновлены вручную. Всего: {total_count}", 'INFO')
+
+                # Закрываем окно
+                numbers_window.destroy()
+
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Ошибка сохранения: {str(e)}")
+
+        def clear_all():
+            """Очистка всех номеров"""
+            if messagebox.askyesno("Подтверждение", "Удалить все номера?"):
+                text_area.delete('1.0', 'end')
+
+                # Сохраняем пустой файл
+                try:
+                    os.makedirs('data', exist_ok=True)
+                    with open(os.path.join('data', 'phone_numbers.txt'), 'w', encoding='utf-8') as f:
+                        f.write('')
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Ошибка сохранения: {str(e)}")
+                    return
+
+                # Обновляем статистику до 0
+                self.stats['total'] = 0
+                self.message_queue.put(('stats',))
+                self.log_message("Все номера телефонов удалены из файла", 'WARNING')
+
+        save_btn = tk.Button(button_frame, text="💾 Сохранить",
+                             command=save_numbers,
+                             bg=self.colors['success'], fg='white',
+                             font=('Segoe UI', 10, 'bold'),
+                             relief='flat', padx=20, pady=5)
+        save_btn.pack(side='left', padx=(0, 10))
+
+        clear_btn = tk.Button(button_frame, text="🗑️ Очистить",
+                              command=clear_all,
+                              bg=self.colors['error'], fg='white',
+                              font=('Segoe UI', 10, 'bold'),
+                              relief='flat', padx=20, pady=5)
+        clear_btn.pack(side='left')
+
         # Контент
         content_frame = tk.Frame(numbers_window, bg='#f5f5f5')
-        content_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        content_frame.pack(fill='both', expand=True, padx=20, pady=(0, 20))
 
         try:
             with open(os.path.join('data', 'phone_numbers.txt'), 'r', encoding='utf-8') as f:
                 content = f.read()
-
-            text_area = scrolledtext.ScrolledText(content_frame,
-                                                  bg='#ffffff',
-                                                  fg=self.colors['text'],
-                                                  font=('Consolas', 10),
-                                                  relief='flat',
-                                                  bd=1)
-            text_area.configure(highlightbackground=self.colors['border'],
-                                highlightthickness=1)
-            text_area.pack(fill='both', expand=True)
-            text_area.insert('1.0', content)
-            text_area.configure(state='disabled')
-
         except FileNotFoundError:
-            error_label = tk.Label(content_frame,
-                                   text="❌ Файл с номерами не найден!",
-                                   font=('Segoe UI', 14),
-                                   fg=self.colors['error'],
-                                   bg='#f5f5f5')
-            error_label.pack(expand=True)
+            content = "# Файл с номерами не найден\n# Добавьте номера в формате:\n# +1234567890\n# +0987654321"
+
+        text_area = scrolledtext.ScrolledText(content_frame,
+                                              bg='#ffffff',
+                                              fg=self.colors['text'],
+                                              font=('Consolas', 10),
+                                              relief='flat',
+                                              bd=1,
+                                              wrap='word')
+        text_area.configure(highlightbackground=self.colors['border'],
+                            highlightthickness=1)
+        text_area.pack(fill='both', expand=True)
+        text_area.insert('1.0', content)
+
+        # Добавляем подсказку
+        info_label = tk.Label(numbers_window,
+                              text="💡 Редактируйте номера и нажмите 'Сохранить' для применения изменений",
+                              font=('Segoe UI', 9),
+                              fg=self.colors['text'],
+                              bg='#f5f5f5')
+        info_label.pack(pady=(0, 10))
 
     def export_results(self):
         """Экспорт результатов"""
@@ -1098,8 +1245,10 @@ class TelegramControlPanel:
             ("Префикс номера:", "PHONE_PREFIX", "text", str(PHONE_PREFIX) if 'PHONE_PREFIX' in globals() else "+55"),
             ("Мин. длина номера:", "MIN_PHONE_LENGTH", "number",
              str(MIN_PHONE_LENGTH) if 'MIN_PHONE_LENGTH' in globals() else "13"),
-            ("Задержка между страницами (сек):", "PAGE_DELAY", "number",
-             str(PAGE_DELAY) if 'PAGE_DELAY' in globals() else "1")
+            ("Тайм-аут загрузки страницы (сек):", "PAGE_DELAY", "number",
+             str(PAGE_DELAY) if 'PAGE_DELAY' in globals() else "1"),
+            ("Ожидаемое кол-во номеров на странице:", "EXPECTED_NUMBERS_PER_PAGE", "number",
+             str(getattr(config, 'EXPECTED_NUMBERS_PER_PAGE', 15) if 'config' in sys.modules else 15))
         ])
 
         # === ГРУППА: Интерфейс ===
@@ -1121,21 +1270,13 @@ class TelegramControlPanel:
         buttons_container.pack(expand=True, pady=15)
 
         # Кнопки
-        apply_btn = tk.Button(buttons_container, text="🔥 Применить",
-                              command=lambda: self.apply_settings_only(),
-                              bg=self.colors['primary'], fg='white',
-                              font=('Segoe UI', 10, 'bold'),
-                              relief='flat', cursor='hand2',
-                              padx=20, pady=8)
-        apply_btn.pack(side='left', padx=(0, 8))
-
         save_btn = tk.Button(buttons_container, text="💾 Сохранить",
                              command=lambda: self.save_settings(settings_window),
                              bg=self.colors['success'], fg='white',
                              font=('Segoe UI', 10, 'bold'),
                              relief='flat', cursor='hand2',
                              padx=20, pady=8)
-        save_btn.pack(side='left', padx=4)
+        save_btn.pack(side='left', padx=(0, 10))
 
         reset_btn = tk.Button(buttons_container, text="🔄 Сброс",
                               command=self.reset_settings,
@@ -1143,7 +1284,7 @@ class TelegramControlPanel:
                               font=('Segoe UI', 10, 'bold'),
                               relief='flat', cursor='hand2',
                               padx=20, pady=8)
-        reset_btn.pack(side='left', padx=4)
+        reset_btn.pack(side='left', padx=5)
 
         cancel_btn = tk.Button(buttons_container, text="❌ Отмена",
                                command=settings_window.destroy,
@@ -1151,7 +1292,7 @@ class TelegramControlPanel:
                                font=('Segoe UI', 10, 'bold'),
                                relief='flat', cursor='hand2',
                                padx=20, pady=8)
-        cancel_btn.pack(side='left', padx=(8, 0))
+        cancel_btn.pack(side='left', padx=(10, 0))
 
         # Центрируем окно
         settings_window.update_idletasks()
@@ -1294,25 +1435,19 @@ END_PAGE = {self.settings_vars['END_PAGE'].get()}
 # Настройки браузера
 HEADLESS_MODE = {self.settings_vars['HEADLESS_MODE'].get()}
 
-# Таймауты (в секундах)
+# Максимальное время ожидания загрузки страницы (в секундах)
+# Примечание: Парсер автоматически переходит к следующей странице после завершения парсинга
 PAGE_DELAY = {self.settings_vars['PAGE_DELAY'].get()}
 
 # Фильтр для номеров телефонов
 PHONE_PREFIX = "{self.settings_vars['PHONE_PREFIX'].get()}"
 MIN_PHONE_LENGTH = {self.settings_vars['MIN_PHONE_LENGTH'].get()}
 
+# Ожидаемое количество номеров на странице (для быстрого переключения)
+EXPECTED_NUMBERS_PER_PAGE = {self.settings_vars['EXPECTED_NUMBERS_PER_PAGE'].get()}
+
 # Файл для сохранения номеров телефонов
 PHONE_NUMBERS_FILE = "phone_numbers.txt"
-
-# Координаты мыши для автоматизации Telegram
-# Замените на реальные координаты, полученные с помощью get_mouse_position()
-MOUSE_COORDINATES = {{
-    'right_click': (650, 250),  # Координаты для правого клика в Telegram
-    'left_click': (785, 450),   # Координаты для левого клика в Telegram
-}}
-MOUSE_COORDINATES_lkm = {{
-    'left_click': (1100, 500),   # Координаты для левого клика в Telegram
-}}
 """
 
             # Сохраняем в файл
@@ -1320,7 +1455,7 @@ MOUSE_COORDINATES_lkm = {{
                 f.write(config_content)
 
             self.log_message("Настройки сохранены и применены немедленно", 'SUCCESS')
-            messagebox.showinfo("Успех", "✅ Настройки сохранены и применены!\n🔥 Перезапуск НЕ требуется!")
+            messagebox.showinfo("Успех", "Настройки сохранены и применены!")
 
             window.destroy()
 
@@ -1350,6 +1485,7 @@ MOUSE_COORDINATES_lkm = {{
             config_module.PHONE_PREFIX = self.settings_vars['PHONE_PREFIX'].get()
             config_module.MIN_PHONE_LENGTH = int(self.settings_vars['MIN_PHONE_LENGTH'].get())
             config_module.PAGE_DELAY = int(self.settings_vars['PAGE_DELAY'].get())
+            config_module.EXPECTED_NUMBERS_PER_PAGE = int(self.settings_vars['EXPECTED_NUMBERS_PER_PAGE'].get())
 
             # Обновляем настройки интерфейса
             config_module.HEADLESS_MODE = self.settings_vars['HEADLESS_MODE'].get()
@@ -1369,6 +1505,7 @@ MOUSE_COORDINATES_lkm = {{
                 'PHONE_PREFIX': self.settings_vars['PHONE_PREFIX'].get(),
                 'MIN_PHONE_LENGTH': int(self.settings_vars['MIN_PHONE_LENGTH'].get()),
                 'PAGE_DELAY': int(self.settings_vars['PAGE_DELAY'].get()),
+                'EXPECTED_NUMBERS_PER_PAGE': int(self.settings_vars['EXPECTED_NUMBERS_PER_PAGE'].get()),
                 'HEADLESS_MODE': self.settings_vars['HEADLESS_MODE'].get()
             })
 
@@ -1417,6 +1554,7 @@ MOUSE_COORDINATES_lkm = {{
                 'PHONE_PREFIX': '+55',
                 'MIN_PHONE_LENGTH': '13',
                 'PAGE_DELAY': '1',
+                'EXPECTED_NUMBERS_PER_PAGE': '15',
                 'HEADLESS_MODE': False
             }
 
@@ -1428,17 +1566,6 @@ MOUSE_COORDINATES_lkm = {{
                         self.settings_vars[key].set(str(default))
 
             messagebox.showinfo("Готово", "Настройки сброшены к значениям по умолчанию")
-
-    def apply_settings_only(self):
-        """Применение настроек без сохранения в файл"""
-        try:
-            self.apply_settings_runtime()
-            self.log_message("🔥 Настройки применены в текущей сессии (не сохранены)", 'SUCCESS')
-            messagebox.showinfo("Применено",
-                                "⚡ Настройки применены в текущей сессии!\n💡 Для постоянного сохранения нажмите 'Сохранить'")
-        except Exception as e:
-            self.log_message(f"Ошибка применения настроек: {str(e)}", 'ERROR')
-            messagebox.showerror("Ошибка", f"Не удалось применить настройки:\n{str(e)}")
 
     def clear_data(self):
         """Очистка данных"""
