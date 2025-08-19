@@ -163,7 +163,6 @@ class AutoTelegramSender:
                 lines = f.readlines()
 
             unprocessed_numbers = []
-            current_page = 1
 
             for line in lines:
                 line = line.strip()

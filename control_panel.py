@@ -3,18 +3,37 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
 import queue
 import os
-import time
 import sys
 from datetime import datetime
 import json
 
 # Импорт ваших существующих модулей БЕЗ ИЗМЕНЕНИЙ
+import io
+from contextlib import redirect_stdout, redirect_stderr
 import config
-from auto_telegram_sender import AutoTelegramSender
-from phone_parser import PhoneNumberParser
 from create_telegram_folders import create_folders_and_copy_telegram
 from config import *
 
+
+class GUIConsoleCapture:
+    """Класс для перехвата вывода консоли в GUI"""
+
+    def __init__(self, gui_log_method):
+        self.gui_log_method = gui_log_method
+        self.buffer = io.StringIO()
+
+    def write(self, text):
+        if text.strip():  # Игнорируем пустые строки
+            clean_text = text.strip()
+            log_type = 'ERROR' if any(word in clean_text.upper() for word in ['ERROR', 'ОШИБКА', '❌', 'FAILED']) else \
+                'SUCCESS' if any(word in clean_text.upper() for word in ['SUCCESS', 'УСПЕШНО', '✅', 'ЗАВЕРШЕН']) else \
+                    'WARNING' if any(
+                        word in clean_text.upper() for word in ['WARNING', 'ПРЕДУПРЕЖДЕНИЕ', '⚠️']) else 'INFO'
+            self.gui_log_method(clean_text, log_type)
+        return len(text)
+
+    def flush(self):
+        pass
 
 class RoundedFrame(tk.Frame):
     """Кастомный Frame с закругленными углами"""
@@ -824,7 +843,7 @@ class TelegramControlPanel:
     # ==== МЕТОДЫ УПРАВЛЕНИЯ (те же что и раньше) ====
 
     def start_parsing(self):
-        """Запуск парсера в отдельном потоке"""
+        """Запуск парсера через существующий main() с перехватом консоли"""
         if self.is_parsing:
             messagebox.showwarning("Предупреждение", "Парсер уже запущен!")
             return
@@ -832,45 +851,26 @@ class TelegramControlPanel:
         def parse_thread():
             try:
                 self.is_parsing = True
-                self.log_message("Запуск парсера номеров...", 'INFO')
+                self.log_message("🚀 Запуск парсера через phone_parser.main()", 'INFO')
                 self.update_status("Парсинг в процессе...", 'INFO')
 
-                self.parser = PhoneNumberParser()
+                # Создаем перехватчик консоли
+                console_capture = GUIConsoleCapture(self.log_message)
 
-                # Получаем актуальные настройки из конфига
-                start_page = getattr(config, 'START_PAGE', 1)
-                end_page = getattr(config, 'END_PAGE', 10)
+                # Перехватываем stdout и stderr
+                with redirect_stdout(console_capture), redirect_stderr(console_capture):
+                    # Запуск существующего main() из phone_parser
+                    from phone_parser import main as parser_main
+                    parser_main()
 
-                # Авторизация с передачей стартовой страницы
-                self.log_message("Выполняется авторизация...", 'INFO')
-                if not self.parser.login(start_page):
-                    self.log_message("Ошибка авторизации!", 'ERROR')
-                    self.update_status("Ошибка авторизации", 'ERROR')
-                    return
-
-                self.log_message("Авторизация успешна!", 'SUCCESS')
-
-                # Парсинг
-                self.log_message(f"Парсинг страниц {start_page}-{end_page}...", 'INFO')
-                phone_numbers = self.parser.parse_all_pages(start_page, end_page)
-
-                # Сохранение
-                self.log_message("Сохранение результатов...", 'INFO')
-                self.parser.save_results(phone_numbers)
-
-                self.stats['total'] = len(phone_numbers)
-                self.message_queue.put(('stats',))
-
-                self.log_message(f"Парсинг завершен! Найдено {len(phone_numbers)} номеров", 'SUCCESS')
+                self.log_message("✅ Парсинг завершен успешно!", 'SUCCESS')
                 self.update_status("Парсинг завершен", 'SUCCESS')
 
             except Exception as e:
-                self.log_message(f"Ошибка парсинга: {str(e)}", 'ERROR')
+                self.log_message(f"❌ Ошибка парсинга: {str(e)}", 'ERROR')
                 self.update_status("Ошибка парсинга", 'ERROR')
             finally:
                 self.is_parsing = False
-                if self.parser:
-                    self.parser.close()
 
         threading.Thread(target=parse_thread, daemon=True).start()
 
@@ -888,20 +888,26 @@ class TelegramControlPanel:
         self.update_status("Парсер остановлен", 'WARNING')
 
     def create_folders(self):
-        """Создание папок с номерами"""
+        """Создание папок через существующий main() с перехватом консоли"""
 
         def create_thread():
             try:
-                self.log_message("Создание папок с номерами...", 'INFO')
+                self.log_message("🚀 Создание папок через create_telegram_folders", 'INFO')
                 self.update_status("Создание папок...", 'INFO')
 
-                create_folders_and_copy_telegram()
+                # Создаем перехватчик консоли
+                console_capture = GUIConsoleCapture(self.log_message)
 
-                self.log_message("Папки созданы успешно!", 'SUCCESS')
+                # Перехватываем stdout и stderr
+                with redirect_stdout(console_capture), redirect_stderr(console_capture):
+                    # Запуск существующей функции создания папок
+                    create_folders_and_copy_telegram()
+
+                self.log_message("✅ Папки созданы успешно!", 'SUCCESS')
                 self.update_status("Папки созданы", 'SUCCESS')
 
             except Exception as e:
-                self.log_message(f"Ошибка создания папок: {str(e)}", 'ERROR')
+                self.log_message(f"❌ Ошибка создания папок: {str(e)}", 'ERROR')
                 self.update_status("Ошибка создания папок", 'ERROR')
 
         threading.Thread(target=create_thread, daemon=True).start()
@@ -937,69 +943,36 @@ class TelegramControlPanel:
             self.log_message(f"Ошибка открытия базовой папки: {str(e)}", 'ERROR')
 
     def start_processing(self):
-        """Запуск обработки номеров"""
+        """Запуск обработки номеров через существующий main() с перехватом консоли"""
         if self.is_processing:
-            messagebox.showwarning("Предупреждение", "Обработка уже запущена!")
             return
 
-        def process_thread():
+        def run_processing():
             try:
                 self.is_processing = True
-                self.log_message("Запуск обработки номеров...", 'INFO')
-                self.update_status("Обработка в процессе...", 'INFO')
+                self.update_status("Запуск обработки...", 'INFO')
+                self.log_message("🚀 Запуск обработки через auto_telegram_sender.main()", 'INFO')
 
-                # Создание экземпляра AutoTelegramSender
-                self.auto_sender = AutoTelegramSender()
+                # Создаем перехватчик консоли
+                console_capture = GUIConsoleCapture(self.log_message)
 
-                # Чтение номеров
-                if not self.auto_sender.read_phone_numbers():
-                    self.log_message("Не найдено номеров для обработки!", 'ERROR')
-                    self.update_status("Нет номеров для обработки", 'WARNING')
-                    return
+                # Перехватываем stdout и stderr
+                with redirect_stdout(console_capture), redirect_stderr(console_capture):
+                    # Запуск существующего main() из auto_telegram_sender
+                    from auto_telegram_sender import main as auto_sender_main
+                    auto_sender_main()
 
-                total_numbers = len(self.auto_sender.phone_numbers)
-                self.stats['total'] = total_numbers
-
-                self.log_message(f"Найдено {total_numbers} номеров для обработки", 'INFO')
-
-                # Обработка каждого номера
-                for i, phone_number in enumerate(self.auto_sender.phone_numbers, 1):
-                    if not self.is_processing:  # Проверка на остановку
-                        break
-
-                    self.log_message(f"Обработка номера {i}/{total_numbers}: {phone_number}", 'INFO')
-                    self.update_progress(i, total_numbers, f"Номер {i}/{total_numbers}")
-
-                    try:
-                        # Здесь вызываются методы из вашего класса БЕЗ ИЗМЕНЕНИЙ
-                        success = self.auto_sender.process_single_number(phone_number)
-
-                        if success:
-                            self.stats['processed'] += 1
-                            self.log_message(f"Номер {phone_number} успешно обработан", 'SUCCESS')
-                        else:
-                            self.stats['errors'] += 1
-                            self.log_message(f"Ошибка обработки номера {phone_number}", 'ERROR')
-
-                    except Exception as e:
-                        self.stats['errors'] += 1
-                        self.log_message(f"Исключение при обработке {phone_number}: {str(e)}", 'ERROR')
-
-                    self.message_queue.put(('stats',))
-                    time.sleep(1)  # Пауза между номерами
-
-                self.log_message("Обработка номеров завершена!", 'SUCCESS')
+                self.log_message("✅ Обработка завершена!", 'SUCCESS')
                 self.update_status("Обработка завершена", 'SUCCESS')
 
             except Exception as e:
-                self.log_message(f"Критическая ошибка: {str(e)}", 'ERROR')
-                self.update_status("Критическая ошибка", 'ERROR')
+                self.log_message(f"❌ Ошибка: {str(e)}", 'ERROR')
+                self.update_status(f"Ошибка: {str(e)}", 'ERROR')
             finally:
                 self.is_processing = False
-                if self.auto_sender and self.auto_sender.driver:
-                    self.auto_sender.driver.quit()
 
-        threading.Thread(target=process_thread, daemon=True).start()
+        # Запуск в отдельном потоке
+        threading.Thread(target=run_processing, daemon=True).start()
 
     def pause_processing(self):
         """Пауза обработки"""
