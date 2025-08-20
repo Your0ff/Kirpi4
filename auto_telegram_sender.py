@@ -2,6 +2,7 @@ import os
 import time
 import subprocess
 import pyperclip
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -93,20 +94,12 @@ class AutoTelegramSender:
                                 clean_line = clean_line.replace(existing_status.value, '').strip()
 
                         # Убираем старые OTP коды, если есть
-                        if 'OTP код:' in clean_line:
-                            clean_line = clean_line.split('OTP код:')[0].strip()
+                        if '+ OTP код:' in clean_line:
+                            clean_line = clean_line.split('+ OTP код:')[0].strip()
 
-                        # Восстанавливаем правильный формат строки
-                        parts = clean_line.split('.')
-                        if len(parts) >= 2:
-                            line_number = parts[0].strip()
-                            # Формируем правильную строку с номером телефона
-                            if phone_number.startswith('+'):
-                                formatted_line = f"{line_number}. {phone_number}"
-                            else:
-                                formatted_line = f"{line_number}. +{phone_number}"
-                        else:
-                            formatted_line = clean_line
+                        # ИСПРАВЛЕНИЕ: Сохраняем всю исходную информацию включая ID
+                        # Не перестраиваем строку, а используем очищенную версию
+                        formatted_line = clean_line
 
                         # Добавляем статус и OTP код
                         if status == PhoneStatus.PROCESSED and otp_code:
@@ -176,20 +169,15 @@ class AutoTelegramSender:
                 if line and not line.startswith('=') and not line.startswith('Найденные') and not line.startswith(
                         'URL:') and not line.startswith('Дата:') and not line.startswith('Всего найдено:'):
                     if '+55' in line and not self.is_number_processed(line):
-                        parts = line.split('.')
-                        if len(parts) >= 2:
-                            full_number_part = parts[1].strip()
-                            # Извлекаем только номер телефона, убирая OTP часть если есть
-                            number = full_number_part.split(' +')[0] if ' +' in full_number_part else full_number_part
-                            number = number.split(' OTP')[0] if ' OTP' in number else number
-                            number = number.strip()
-
-                            if number.startswith('+55'):
-                                unprocessed_numbers.append({
-                                    'number': number,
-                                    'page': self.current_page
-                                })
-                                print(f"📱 Найден необработанный номер: {number} (Страница {self.current_page})")
+                        # Используем регулярное выражение для извлечения только номера телефона
+                        phone_match = re.search(r'\+55\d{11}', line)
+                        if phone_match:
+                            number = phone_match.group()
+                            unprocessed_numbers.append({
+                                'number': number,
+                                'page': self.current_page
+                            })
+                            print(f"📱 Найден необработанный номер: {number} (Страница {self.current_page})")
 
             print(f"✅ Найдено {len(unprocessed_numbers)} необработанных номеров")
             return unprocessed_numbers
@@ -246,9 +234,12 @@ class AutoTelegramSender:
     def open_telegram_with_number(self, phone_number):
         """Открытие Telegram с конкретным номером"""
         try:
-            # Извлекаем только номер телефона, убирая OTP часть если есть
-            clean_number = phone_number.split(' +')[0] if ' +' in phone_number else phone_number
-            clean_number = clean_number.split(' OTP')[0] if ' OTP' in clean_number else clean_number
+            # Используем регулярное выражение для извлечения только номера телефона
+            phone_match = re.search(r'\+55\d{11}', phone_number)
+            if phone_match:
+                clean_number = phone_match.group()
+            else:
+                clean_number = phone_number
 
             # Формируем путь к папке с номером
             folder_name = clean_number.replace('+', '').replace('-', '').replace(' ', '')
@@ -336,8 +327,15 @@ class AutoTelegramSender:
             self.keyboard.release(Key.backspace)
             time.sleep(0.01)
 
+            # Извлекаем только номер телефона для ввода
+            phone_match = re.search(r'\+55\d{11}', phone_number)
+            if phone_match:
+                clean_number = phone_match.group()
+            else:
+                clean_number = phone_number
+
             # Вводим номер телефона
-            self.keyboard.type(phone_number)
+            self.keyboard.type(clean_number)
             self.keyboard.press(Key.enter)
             self.keyboard.release(Key.enter)
             return True
@@ -405,9 +403,16 @@ class AutoTelegramSender:
     def find_and_click_request_otp(self, phone_number):
         """Поиск и нажатие кнопки Request OTP для конкретного номера"""
         try:
+            # Извлекаем только номер телефона для поиска
+            phone_match = re.search(r'\+55\d{11}', phone_number)
+            if phone_match:
+                clean_number = phone_match.group()
+            else:
+                clean_number = phone_number
+
             # Ищем card-body с номером телефона (номер отображается с +)
             card_body = self.driver.find_element(By.XPATH,
-                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
+                                                 f"//div[contains(@class, 'card-body') and contains(., '{clean_number}')]")
 
             # Ищем кнопку Request OTP внутри этого card-body
             request_otp_button = card_body.find_element(By.XPATH,
@@ -415,7 +420,7 @@ class AutoTelegramSender:
 
             # Нажимаем кнопку
             request_otp_button.click()
-            print(f"✅ Кнопка Request OTP нажата для номера {phone_number}")
+            print(f"✅ Кнопка Request OTP нажата для номера {clean_number}")
             time.sleep(WAIT_AFTER_OTP_REQUEST)
             return True
 
@@ -472,6 +477,13 @@ class AutoTelegramSender:
 
         print(f"⏳ Ожидание появления OTP кода для {phone_number} (максимум {timeout}с)...")
 
+        # Извлекаем только номер телефона для поиска
+        phone_match = re.search(r'\+55\d{11}', phone_number)
+        if phone_match:
+            clean_number = phone_match.group()
+        else:
+            clean_number = phone_number
+
         while time.time() - start_time < timeout:
             check_count += 1
             elapsed_time = time.time() - start_time
@@ -480,7 +492,7 @@ class AutoTelegramSender:
             try:
                 # Ищем card-body с номером телефона (номер отображается с +)
                 card_body = self.driver.find_element(By.XPATH,
-                                                     f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
+                                                     f"//div[contains(@class, 'card-body') and contains(., '{clean_number}')]")
 
                 # Ищем третью кнопку копирования (для OTP)
                 copy_buttons = card_body.find_elements(By.XPATH,
@@ -573,9 +585,12 @@ class AutoTelegramSender:
         """Очистка папки номера после успешной обработки"""
         try:
             import shutil
-            # Извлекаем только номер телефона, убирая OTP часть если есть
-            clean_number = phone_number.split(' +')[0] if ' +' in phone_number else phone_number
-            clean_number = clean_number.split(' OTP')[0] if ' OTP' in clean_number else clean_number
+            # Используем регулярное выражение для извлечения только номера телефона
+            phone_match = re.search(r'\+55\d{11}', phone_number)
+            if phone_match:
+                clean_number = phone_match.group()
+            else:
+                clean_number = phone_number
 
             # Формируем путь к папке с номером
             folder_name = clean_number.replace('+', '').replace('-', '').replace(' ', '')
@@ -620,9 +635,16 @@ class AutoTelegramSender:
     def is_number_banned(self, phone_number):
         """Проверяет, забанен ли номер (имеет ли статус BR - BAN)"""
         try:
+            # Извлекаем только номер телефона для поиска
+            phone_match = re.search(r'\+55\d{11}', phone_number)
+            if phone_match:
+                clean_number = phone_match.group()
+            else:
+                clean_number = phone_number
+
             # Ищем карточку с номером (номер отображается с +)
             card_body = self.driver.find_element(By.XPATH,
-                                                 f"//div[contains(@class, 'card-body') and contains(., '{phone_number}')]")
+                                                 f"//div[contains(@class, 'card-body') and contains(., '{clean_number}')]")
 
             # Проверяем наличие блока с BR - BAN
             ban_element = card_body.find_element(By.XPATH,
