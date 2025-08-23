@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import EMAIL, PASSWORD, HEADLESS_MODE, base_path
+from config import EMAIL, PASSWORD, HEADLESS_MODE, base_path, PHONE_PREFIX
 from enum import Enum
 from pynput.keyboard import Key, Controller as KeyboardController
 from pynput import mouse
@@ -168,9 +168,9 @@ class AutoTelegramSender:
 
                 if line and not line.startswith('=') and not line.startswith('Найденные') and not line.startswith(
                         'URL:') and not line.startswith('Дата:') and not line.startswith('Всего найдено:'):
-                    if '+55' in line and not self.is_number_processed(line):
+                    if f'{PHONE_PREFIX}' in line and not self.is_number_processed(line):
                         # Используем регулярное выражение для извлечения только номера телефона
-                        phone_match = re.search(r'\+55\d{11}', line)
+                        phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', line)
                         if phone_match:
                             number = phone_match.group()
                             unprocessed_numbers.append({
@@ -235,7 +235,7 @@ class AutoTelegramSender:
         """Открытие Telegram с конкретным номером"""
         try:
             # Используем регулярное выражение для извлечения только номера телефона
-            phone_match = re.search(r'\+55\d{11}', phone_number)
+            phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
             if phone_match:
                 clean_number = phone_match.group()
             else:
@@ -328,7 +328,7 @@ class AutoTelegramSender:
             time.sleep(0.01)
 
             # Извлекаем только номер телефона для ввода
-            phone_match = re.search(r'\+55\d{11}', phone_number)
+            phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
             if phone_match:
                 clean_number = phone_match.group()
             else:
@@ -404,7 +404,7 @@ class AutoTelegramSender:
         """Поиск и нажатие кнопки Request OTP для конкретного номера"""
         try:
             # Извлекаем только номер телефона для поиска
-            phone_match = re.search(r'\+55\d{11}', phone_number)
+            phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
             if phone_match:
                 clean_number = phone_match.group()
             else:
@@ -478,7 +478,7 @@ class AutoTelegramSender:
         print(f"⏳ Ожидание появления OTP кода для {phone_number} (максимум {timeout}с)...")
 
         # Извлекаем только номер телефона для поиска
-        phone_match = re.search(r'\+55\d{11}', phone_number)
+        phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
         if phone_match:
             clean_number = phone_match.group()
         else:
@@ -586,7 +586,7 @@ class AutoTelegramSender:
         try:
             import shutil
             # Используем регулярное выражение для извлечения только номера телефона
-            phone_match = re.search(r'\+55\d{11}', phone_number)
+            phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
             if phone_match:
                 clean_number = phone_match.group()
             else:
@@ -636,7 +636,7 @@ class AutoTelegramSender:
         """Проверяет, забанен ли номер (имеет ли статус BR - BAN)"""
         try:
             # Извлекаем только номер телефона для поиска
-            phone_match = re.search(r'\+55\d{11}', phone_number)
+            phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
             if phone_match:
                 clean_number = phone_match.group()
             else:

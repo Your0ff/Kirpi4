@@ -2,7 +2,7 @@ import os
 import shutil
 import re
 
-from config import base_path, telegram_exe_path
+from config import base_path, telegram_exe_path, PHONE_PREFIX
 
 
 def create_folders_and_copy_telegram():
@@ -68,9 +68,9 @@ def create_folders_and_copy_telegram():
             if line and not line.startswith('=') and not line.startswith('Найденные') and not line.startswith(
                     'URL:') and not line.startswith('Дата:') and not line.startswith('Всего найдено:'):
                 # Ищем номера в строке вида "1. +5581991302524 ID: 249598"
-                if '+55' in line:
+                if f'{PHONE_PREFIX}' in line:
                     # Используем регулярное выражение для извлечения только номера телефона
-                    phone_match = re.search(r'\+55\d{11}', line)
+                    phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', line)
                     if phone_match:
                         phone_number = phone_match.group()
                         phone_numbers.append(phone_number)
