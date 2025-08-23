@@ -142,8 +142,7 @@ class AutoTelegramSender:
         line = line.strip()
         return (line.endswith('+') or
                 '+ OTP код:' in line or
-                '- BAN' in line or
-                '- nocode' in line)
+                '- BAN' in line)
 
     def load_unprocessed_numbers(self):
         """Загружает только необработанные номера телефонов"""
@@ -699,7 +698,7 @@ class AutoTelegramSender:
                 time.sleep(1)
                 continue
 
-            time.sleep(3)  # Даем Telegram обработать ввод номера
+            time.sleep(5)  # Даем Telegram обработать ввод номера
 
             if not self.find_and_click_request_otp(phone_number):
                 failed_processes += 1

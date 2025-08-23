@@ -5,7 +5,6 @@ import sys
 import os
 import threading
 from datetime import datetime
-import locale
 
 
 class PhoneNumbersEditor:
