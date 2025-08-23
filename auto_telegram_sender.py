@@ -81,37 +81,36 @@ class AutoTelegramSender:
     def update_phone_status(self, phone_number, status: PhoneStatus, otp_code=None):
         """Универсальный метод для обновления статуса номера и добавления OTP кода"""
         try:
+            # Извлекаем чистый номер для поиска
+            phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
+            if phone_match:
+                clean_number = phone_match.group()
+            else:
+                clean_number = phone_number
+
             with open(PHONE_NUMBERS_FILE, 'r', encoding='utf-8') as file:
                 lines = file.readlines()
 
             with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
                 for line in lines:
-                    if phone_number in line:
-                        # Убираем существующие статусы
-                        clean_line = line.strip()
-                        for existing_status in PhoneStatus:
-                            if existing_status.value and existing_status.value in clean_line:
-                                clean_line = clean_line.replace(existing_status.value, '').strip()
+                    if clean_number in line:
+                        # Находим позицию номера телефона в строке
+                        number_match = re.search(rf'\+{PHONE_PREFIX}\d+', line)
+                        if number_match:
+                            # Берем часть строки ДО номера + сам номер
+                            start_pos = line.find(number_match.group())
+                            end_pos = start_pos + len(number_match.group())
 
-                        # Убираем старые OTP коды, если есть
-                        if '+ OTP код:' in clean_line:
-                            clean_line = clean_line.split('+ OTP код:')[0].strip()
+                            # Берем префикс (ID и прочее до номера) + номер
+                            base_part = line[:end_pos].strip()
 
-                        # ИСПРАВЛЕНИЕ: Сохраняем всю исходную информацию включая ID
-                        # Не перестраиваем строку, а используем очищенную версию
-                        formatted_line = clean_line
-
-                        # Добавляем статус и OTP код
-                        if status == PhoneStatus.PROCESSED and otp_code:
-                            line = f"{formatted_line} + OTP код: {otp_code}"
-                        elif status.value:
-                            line = f"{formatted_line} {status.value}"
-                        else:
-                            line = formatted_line
-
-                        line += '\n'
-                    else:
-                        line = line
+                            # Добавляем статус и OTP код
+                            if status == PhoneStatus.PROCESSED and otp_code:
+                                line = f"{base_part} + OTP код: {otp_code}\n"
+                            elif status.value:
+                                line = f"{base_part} {status.value}\n"
+                            else:
+                                line = f"{base_part}\n"
                     file.write(line)
 
             status_name = {
@@ -120,10 +119,9 @@ class AutoTelegramSender:
                 PhoneStatus.NO_CODE: "без кода"
             }.get(status, "обновленным")
 
-            print(f"✅ Номер {phone_number} отмечен как {status_name}")
+            print(f"✅ Номер {clean_number} отмечен как {status_name}")
         except Exception as e:
             print(f"❌ Ошибка при обновлении статуса номера {phone_number}: {e}")
-
     def mark_number_as_processed(self, phone_number, otp_code=None):
         """Отмечает номер как обработанный с возможностью добавления OTP кода"""
         self.update_phone_status(phone_number, PhoneStatus.PROCESSED, otp_code)
