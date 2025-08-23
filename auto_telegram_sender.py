@@ -30,7 +30,7 @@ WAIT_COPY_OTP_ATTEMPTS = 10
 class PhoneStatus(Enum):
     """Статусы обработки номеров телефонов"""
     UNPROCESSED = ""
-    PROCESSED = "+"
+    PROCESSED = " +"
     BANNED = "- BAN"
     NO_CODE = "- nocode"
 
