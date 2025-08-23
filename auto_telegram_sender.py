@@ -94,23 +94,30 @@ class AutoTelegramSender:
             with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
                 for line in lines:
                     if clean_number in line:
-                        # Находим позицию номера телефона в строке
-                        number_match = re.search(rf'\+{PHONE_PREFIX}\d+', line)
-                        if number_match:
-                            # Берем часть строки ДО номера + сам номер
-                            start_pos = line.find(number_match.group())
-                            end_pos = start_pos + len(number_match.group())
+                        # ИСПРАВЛЕНИЕ: ищем паттерн "номер ID: число"
+                        pattern = rf'({re.escape(clean_number)}\s+ID:\s+\d+)'
+                        match = re.search(pattern, line)
 
-                            # Берем префикс (ID и прочее до номера) + номер
-                            base_part = line[:end_pos].strip()
+                        if match:
+                            # Берем номер + ID полностью
+                            base_part = match.group(1)
+                            # Берем префикс до номера (например "1. ")
+                            prefix = line[:match.start()].strip()
 
-                            # Добавляем статус и OTP код
-                            if status == PhoneStatus.PROCESSED and otp_code:
-                                line = f"{base_part} + OTP код: {otp_code}\n"
-                            elif status.value:
-                                line = f"{base_part} {status.value}\n"
-                            else:
-                                line = f"{base_part}\n"
+                            # Формируем полную базовую часть
+                            full_base = f"{prefix} {base_part}".strip()
+                        else:
+                            # Fallback: используем старый метод
+                            full_base = line.split()[0] + " " + clean_number
+
+                        # Добавляем статус и OTP код
+                        if status == PhoneStatus.PROCESSED and otp_code:
+                            line = f"{full_base} + OTP код: {otp_code}\n"
+                        elif status.value:
+                            line = f"{full_base} {status.value}\n"
+                        else:
+                            line = f"{full_base}\n"
+
                     file.write(line)
 
             status_name = {
@@ -122,6 +129,7 @@ class AutoTelegramSender:
             print(f"✅ Номер {clean_number} отмечен как {status_name}")
         except Exception as e:
             print(f"❌ Ошибка при обновлении статуса номера {phone_number}: {e}")
+
     def mark_number_as_processed(self, phone_number, otp_code=None):
         """Отмечает номер как обработанный с возможностью добавления OTP кода"""
         self.update_phone_status(phone_number, PhoneStatus.PROCESSED, otp_code)

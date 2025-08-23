@@ -142,7 +142,7 @@ class PhoneNumberParser:
         phone_data = []
 
         # Паттерн для поиска номеров телефонов
-        phone_pattern = rf'\{PHONE_PREFIX}[0-9\s\-\(\)\.]+'
+        phone_pattern = rf'{re.escape(PHONE_PREFIX)}[0-9\s\-\(\)\.]+'
         # Паттерн для поиска ID
         id_pattern = r'<h4 class="order_id">ID: (\d+)</h4>'
 
@@ -211,7 +211,7 @@ class PhoneNumberParser:
                         f.write('\n')
                     f.write(f"=== Страница {page} ===\n")
                     page += 1
-                f.write(f"{i}. {data['number']} ID: {data['id']}\n")
+                f.write(f"{i}. +{data['number']} ID: {data['id']}\n")
         print(f"✅ Результаты сохранены в {txt_path}")
 
     def close(self):
