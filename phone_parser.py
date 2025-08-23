@@ -142,7 +142,7 @@ class PhoneNumberParser:
         phone_data = []
 
         # Паттерн для поиска номеров телефонов
-        phone_pattern = r'\+55[0-9\s\-\(\)\.]+'
+        phone_pattern = rf'\{PHONE_PREFIX}[0-9\s\-\(\)\.]+'
         # Паттерн для поиска ID
         id_pattern = r'<h4 class="order_id">ID: (\d+)</h4>'
 
@@ -155,7 +155,7 @@ class PhoneNumberParser:
         phone_positions = []
         for match in phone_matches:
             cleaned_number = re.sub(r'[^\d\+]', '', match.group())
-            if cleaned_number.startswith(PHONE_PREFIX) and len(cleaned_number) >= MIN_PHONE_LENGTH:
+            if cleaned_number.startswith(PHONE_PREFIX):
                 phone_positions.append({
                     'number': cleaned_number,
                     'position': match.start()
