@@ -93,17 +93,9 @@ class PhoneNumberParser:
     def wait_and_parse_page(self):
         """Ждет загрузки страницы и парсит номера с ID"""
         try:
-            # Ждем появления основного контента страницы
+            # Ждем появления строк таблицы с заказами
             WebDriverWait(self.driver, 10).until(
-                EC.any_of(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "table")),
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".order-item")),
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".list-group")),
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".card")),
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".content")),
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "main")),
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".container"))
-                )
+                EC.presence_of_element_located((By.CSS_SELECTOR, "tr.order-row"))
             )
 
             # Парсим страницу до тех пор, пока не найдем достаточное количество номеров
@@ -111,8 +103,14 @@ class PhoneNumberParser:
             expected_numbers = getattr(sys.modules.get('config'), 'EXPECTED_NUMBERS_PER_PAGE', 15)
 
             for attempt in range(max_attempts):
-                page_source = self.driver.page_source
-                current_data = self.extract_phone_numbers_with_ids(page_source)
+                # Пробуем извлечь данные через Selenium (более надежно)
+                current_data = self.extract_phone_numbers_with_ids_selenium()
+                
+                # Если не получилось через Selenium, пробуем через HTML
+                if len(current_data) == 0:
+                    page_source = self.driver.page_source
+                    current_data = self.extract_phone_numbers_with_ids(page_source)
+                
                 current_count = len(current_data)
 
                 # Если найдено достаточное количество номеров - возвращаем результат
@@ -132,74 +130,125 @@ class PhoneNumberParser:
             print(f"❌ Ошибка при парсинге страницы: {e}")
             # В случае ошибки пытаемся спарсить то, что есть
             try:
+                # Сначала пробуем через Selenium
+                data = self.extract_phone_numbers_with_ids_selenium()
+                if len(data) > 0:
+                    return data
+                # Если не получилось, пробуем через HTML
                 page_source = self.driver.page_source
                 return self.extract_phone_numbers_with_ids(page_source)
-            except:
+            except Exception as e2:
+                print(f"⚠️ Ошибка при извлечении данных: {e2}")
                 return []
 
+    def extract_phone_numbers_with_ids_selenium(self):
+        """Извлекает номера телефонов через Selenium (более надежный способ)"""
+        phone_data = []
+        used_numbers = set()
+        
+        try:
+            # Находим все строки таблицы
+            rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.order-row")
+            
+            for row in rows:
+                try:
+                    # Извлекаем ID из <td class="text-muted">
+                    id_elements = row.find_elements(By.CSS_SELECTOR, "td.text-muted")
+                    if not id_elements:
+                        # Альтернативный способ - из checkbox
+                        checkbox = row.find_element(By.CSS_SELECTOR, "input.account-checkbox")
+                        order_id = checkbox.get_attribute("data-order-id")
+                    else:
+                        order_id = id_elements[0].text.strip()
+                    
+                    if not order_id:
+                        continue
+                    
+                    # Ищем номер телефона в теге <b>
+                    phone_elements = row.find_elements(By.CSS_SELECTOR, "td b")
+                    
+                    for phone_elem in phone_elements:
+                        phone_text = phone_elem.text.strip()
+                        # Проверяем, что это номер телефона с нужным префиксом
+                        if phone_text.startswith(PHONE_PREFIX) and phone_text not in used_numbers:
+                            # Очищаем номер от возможных пробелов
+                            phone_number = re.sub(r'[^\d\+]', '', phone_text)
+                            if phone_number.startswith(PHONE_PREFIX):
+                                phone_data.append({
+                                    'number': phone_number,
+                                    'id': order_id
+                                })
+                                used_numbers.add(phone_number)
+                                break  # Нашли номер для этой строки
+                    
+                except Exception as e:
+                    # Пропускаем проблемную строку
+                    continue
+            
+        except Exception as e:
+            print(f"⚠️ Ошибка при извлечении через Selenium: {e}")
+        
+        return phone_data
+    
     def extract_phone_numbers_with_ids(self, html_content):
-        """Извлекает номера телефонов и соответствующие им ID"""
+        """Извлекает номера телефонов и соответствующие им ID из новой структуры таблицы"""
         phone_data = []
 
-        # Паттерн для поиска номеров телефонов
-        phone_pattern = rf'{re.escape("+" + PHONE_PREFIX)}[0-9\s\-\(\)\.]+'
-        # Паттерн для поиска ID
-        id_pattern = r'<h4 class="order_id">ID: (\d+)</h4>'
+        # Более гибкий паттерн для поиска строк таблицы (учитываем возможные пробелы и другие атрибуты)
+        row_pattern = r'<tr\s+class=["\']order-row["\'].*?>(.*?)</tr>'
+        rows = re.finditer(row_pattern, html_content, re.DOTALL | re.IGNORECASE)
 
-        # Находим все номера телефонов
-        phone_matches = list(re.finditer(phone_pattern, html_content))
-        # Находим все ID
-        id_matches = list(re.finditer(id_pattern, html_content))
-
-        # Создаем словарь для связывания номеров с ID по позиции в тексте
-        phone_positions = []
-        for match in phone_matches:
-            cleaned_number = re.sub(r'[^\d\+]', '', match.group())
-            if cleaned_number.startswith("+" + PHONE_PREFIX):
-                phone_positions.append({
-                    'number': cleaned_number,
-                    'position': match.start()
-                })
-
-        id_positions = []
-        for match in id_matches:
-            id_positions.append({
-                'id': match.group(1),
-                'position': match.start()
-            })
-
-        # Связываем номера с ближайшими ID
         used_numbers = set()
-        for phone_info in phone_positions:
-            phone_number = phone_info['number']
-            phone_pos = phone_info['position']
+        rows_found = 0
 
-            # Избегаем дублирования номеров
-            if phone_number in used_numbers:
+        for row_match in rows:
+            rows_found += 1
+            row_html = row_match.group(1)
+
+            # Извлекаем ID из <td class="text-muted">ID</td>
+            id_match = re.search(r'<td\s+class=["\']text-muted["\']>(\d+)</td>', row_html, re.IGNORECASE)
+            if not id_match:
+                # Альтернативный способ - из data-order-id атрибута checkbox
+                id_match = re.search(r'data-order-id=["\'](\d+)["\']', row_html, re.IGNORECASE)
+            
+            if not id_match:
                 continue
 
-            # Ищем ближайший ID (обычно ID идет перед номером)
-            closest_id = None
-            min_distance = float('inf')
+            order_id = id_match.group(1)
 
-            for id_info in id_positions:
-                id_pos = id_info['position']
-                # Рассматриваем ID, которые находятся перед номером или недалеко после
-                distance = abs(phone_pos - id_pos)
-                if distance < min_distance:
-                    min_distance = distance
-                    closest_id = id_info['id']
+            # Более гибкий поиск номера телефона - ищем <b> с номером телефона
+            # Может быть в разных местах внутри <td>
+            phone_pattern = rf'<b>\s*({re.escape(PHONE_PREFIX)}\d+)\s*</b>'
+            phone_match = re.search(phone_pattern, row_html, re.IGNORECASE)
+            
+            # Если не нашли в <b>, пробуем найти номер напрямую по паттерну
+            if not phone_match:
+                phone_pattern2 = rf'({re.escape(PHONE_PREFIX)}\d{{10,}})'
+                phone_match = re.search(phone_pattern2, row_html)
+            
+            if not phone_match:
+                continue
 
-            if closest_id:
+            phone_number = phone_match.group(1).strip()
+            # Очищаем номер от возможных пробелов и форматирования
+            phone_number = re.sub(r'[^\d\+]', '', phone_number)
+
+            # Проверяем, что номер начинается с нужного префикса и не дублируется
+            if phone_number.startswith(PHONE_PREFIX) and phone_number not in used_numbers:
                 phone_data.append({
                     'number': phone_number,
-                    'id': closest_id
+                    'id': order_id
                 })
                 used_numbers.add(phone_number)
 
+        if rows_found == 0:
+            print("⚠️ Не найдено ни одной строки <tr class='order-row'>")
+        elif len(phone_data) == 0:
+            print(f"⚠️ Найдено строк: {rows_found}, но номера не извлечены. Проверьте префикс PHONE_PREFIX='{PHONE_PREFIX}'")
+
         return phone_data
 
-    def save_results(self, phone_data, phones_per_page=15):
+    def save_results(self, phone_data, phones_per_page=EXPECTED_NUMBERS_PER_PAGE):
         os.makedirs('data', exist_ok=True)
         txt_path = os.path.join('data', 'phone_numbers.txt')
         with open(txt_path, 'w', encoding='utf-8') as f:

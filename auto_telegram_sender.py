@@ -371,22 +371,27 @@ class AutoTelegramSender:
 
                     # 3. Альтернативная проверка по содержимому страницы
                     try:
-                        # Ищем любой элемент, уникальный для этой страницы (например, первый номер телефона)
-                        phone_element = WebDriverWait(self.driver, 5).until(
-                            EC.presence_of_element_located((By.XPATH,
-                                                            f"//div[contains(@class, 'card-body') and contains(., '{self.phone_numbers[0]['number']}')]"))
-                        )
-                        print(f"✅ Успешно перешли на страницу {page_number} (по содержимому)")
-                        return True
+                        # Ищем строку таблицы с номером телефона
+                        if self.phone_numbers:
+                            phone_element = WebDriverWait(self.driver, 5).until(
+                                EC.presence_of_element_located((By.XPATH,
+                                                                f"//tr[@class='order-row' and contains(., '{self.phone_numbers[0]['number']}')]"))
+                            )
+                            print(f"✅ Успешно перешли на страницу {page_number} (по содержимому)")
+                            return True
                     except:
                         pass
 
                     # 4. Проверка через пагинацию (если предыдущие методы не сработали)
                     try:
-                        active_page = self.driver.find_element(By.CSS_SELECTOR,
-                                                               ".v-pagination__item--active button").text
-                        if active_page == str(page_number):
-                            print(f"✅ Успешно перешли на страницу {page_number} (по пагинации)")
+                        # Ждем появления строк таблицы
+                        WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "tr.order-row"))
+                        )
+                        # Проверяем, что есть строки таблицы на странице
+                        rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.order-row")
+                        if len(rows) > 0:
+                            print(f"✅ Успешно перешли на страницу {page_number} (найдены строки таблицы)")
                             return True
                     except:
                         pass
@@ -415,13 +420,12 @@ class AutoTelegramSender:
             else:
                 clean_number = phone_number
 
-            # Ищем card-body с номером телефона (номер отображается с +)
-            card_body = self.driver.find_element(By.XPATH,
-                                                 f"//div[contains(@class, 'card-body') and contains(., '{clean_number}')]")
+            # Ищем строку таблицы с номером телефона
+            row = self.driver.find_element(By.XPATH,
+                                          f"//tr[@class='order-row' and contains(., '{clean_number}')]")
 
-            # Ищем кнопку Request OTP внутри этого card-body
-            request_otp_button = card_body.find_element(By.XPATH,
-                                                        ".//button[contains(text(), 'Request OTP') or contains(text(), 'OTP')]")
+            # Ищем кнопку Request OTP внутри этой строки (кнопка с классом request_otp)
+            request_otp_button = row.find_element(By.CSS_SELECTOR, "button.request_otp")
 
             # Нажимаем кнопку
             request_otp_button.click()
@@ -430,7 +434,7 @@ class AutoTelegramSender:
             return True
 
         except Exception as e:
-            print(f"❌ Не удалось найти кнопку Request OTP для {phone_number}")
+            print(f"❌ Не удалось найти кнопку Request OTP для {phone_number}: {e}")
             return False
 
     def mark_number_as_nocode(self, phone_number):
@@ -495,19 +499,20 @@ class AutoTelegramSender:
             print(f"🔍 Проверка {check_count}: поиск OTP кода ({elapsed_time:.1f}с)")
 
             try:
-                # Ищем card-body с номером телефона (номер отображается с +)
-                card_body = self.driver.find_element(By.XPATH,
-                                                     f"//div[contains(@class, 'card-body') and contains(., '{clean_number}')]")
+                # Ищем строку таблицы с номером телефона
+                row = self.driver.find_element(By.XPATH,
+                                              f"//tr[@class='order-row' and contains(., '{clean_number}')]")
 
-                # Ищем третью кнопку копирования (для OTP)
-                copy_buttons = card_body.find_elements(By.XPATH,
-                                                       ".//i[contains(@class, 'mdi-content-copy') and contains(@class, 'copy_address')]")
-
-                if len(copy_buttons) >= 3:
-                    # Берем третью кнопку копирования (для OTP)
-                    otp_copy_button = copy_buttons[2]
+                # Ищем кнопку копирования OTP внутри otparea (div с классом otparea)
+                otp_area = row.find_element(By.CSS_SELECTOR, "div.otparea")
+                
+                # Проверяем, видима ли область OTP
+                if otp_area.is_displayed():
+                    # Ищем кнопку копирования внутри otparea
+                    copy_button = otp_area.find_element(By.CSS_SELECTOR, "i.mdi-content-copy.copy_address")
+                    
                     # Кликаем на кнопку копирования OTP
-                    otp_copy_button.click()
+                    copy_button.click()
                     time.sleep(1)
 
                     # Получаем скопированный текст из буфера обмена
@@ -535,7 +540,7 @@ class AutoTelegramSender:
                         time.sleep(1)  # Проверяем каждую секунду
                         continue
                 else:
-                    # Кнопка копирования недоступна, ждем и проверяем снова
+                    # Область OTP еще не появилась, ждем и проверяем снова
                     time.sleep(1)
                     continue
 
@@ -638,7 +643,7 @@ class AutoTelegramSender:
             return False
 
     def is_number_banned(self, phone_number):
-        """Проверяет, забанен ли номер (имеет ли статус BR - BAN)"""
+        """Проверяет, забанен ли номер (имеет ли статус BAN в badge)"""
         try:
             # Извлекаем только номер телефона для поиска
             phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', phone_number)
@@ -647,16 +652,21 @@ class AutoTelegramSender:
             else:
                 clean_number = phone_number
 
-            # Ищем карточку с номером (номер отображается с +)
-            card_body = self.driver.find_element(By.XPATH,
-                                                 f"//div[contains(@class, 'card-body') and contains(., '{clean_number}')]")
+            # Ищем строку таблицы с номером телефона
+            row = self.driver.find_element(By.XPATH,
+                                          f"//tr[@class='order-row' and contains(., '{clean_number}')]")
 
-            # Проверяем наличие блока с BR - BAN
-            ban_element = card_body.find_element(By.XPATH,
-                                                 ".//h6[contains(@class, 'mb-1') and contains(., 'BR - BAN')]")
-            return True
+            # Проверяем наличие badge с текстом, содержащим BAN
+            # Ищем badge с классом badge-success или другими badge, содержащий BAN
+            ban_badges = row.find_elements(By.CSS_SELECTOR, "span.badge")
+            for badge in ban_badges:
+                badge_text = badge.text.strip().upper()
+                if 'BAN' in badge_text:
+                    return True
+            
+            return False
         except:
-            # Номер не забанен, возвращаем False без вывода ошибки
+            # Номер не найден или не забанен, возвращаем False без вывода ошибки
             return False
 
     def process_all_numbers(self):
