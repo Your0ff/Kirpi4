@@ -77,8 +77,9 @@ class PhoneNumberParser:
             # Для первой страницы не делаем переход, так как мы уже на ней после login()
             if page_num != start:
                 print(f"🔍 Переход на страницу {page_num}...")
-                page_url = f"{BASE_URL}?page={page_num}"
-                self.driver.get(page_url)
+                if not self.navigate_to_page(page_num):
+                    print(f"⚠️ Не удалось перейти на страницу {page_num}, пропускаем...")
+                    continue
             else:
                 print(f"🔍 Парсинг текущей страницы {page_num}...")
 
@@ -89,6 +90,71 @@ class PhoneNumberParser:
 
         print(f"🎯 Всего найдено номеров: {len(all_phone_data)}")
         return all_phone_data
+    
+    def navigate_to_page(self, page_number):
+        """Переходит на указанную страницу через клик по ссылке пагинации"""
+        try:
+            if page_number == 1:
+                self.driver.get(f"{BASE_URL}")
+                time.sleep(2)
+                return True
+
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    # Ждем появления контейнера пагинации
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.ID, "pagination-container"))
+                    )
+                    
+                    # Ищем ссылку пагинации с нужным номером страницы
+                    pagination_link = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, 
+                            f"//div[@id='pagination-container']//a[@class='page-link' and contains(@href, 'page={page_number}')]"))
+                    )
+                    
+                    # Прокручиваем к элементу, если нужно
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", pagination_link)
+                    time.sleep(0.5)
+                    
+                    # Кликаем на ссылку пагинации
+                    pagination_link.click()
+                    time.sleep(2)  # Даем время для AJAX загрузки
+
+                    # Проверяем, что страница загрузилась
+                    try:
+                        # Ждем обновления пагинации (активная страница должна иметь класс active)
+                        WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.XPATH,
+                                f"//div[@id='pagination-container']//li[@class='page-item active']//span[contains(text(), '{page_number}')]"))
+                        )
+                        print(f"✅ Успешно перешли на страницу {page_number}")
+                        
+                        # Дополнительная проверка - ждем появления строк таблицы
+                        WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "tr.order-row"))
+                        )
+                        return True
+                    except:
+                        # Альтернативная проверка - просто наличие строк таблицы
+                        rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.order-row")
+                        if len(rows) > 0:
+                            print(f"✅ Успешно перешли на страницу {page_number} (найдены строки таблицы)")
+                            return True
+
+                    print(f"⚠️ Попытка {attempt}: Не удалось подтвердить переход на страницу {page_number}")
+                    time.sleep(2)
+
+                except Exception as e:
+                    print(f"⚠️ Попытка {attempt}: Не удалось перейти на страницу {page_number}: {e}")
+                    time.sleep(2)
+
+            print(f"❌ Не удалось перейти на страницу {page_number} после {max_attempts} попыток")
+            return False
+
+        except Exception as e:
+            print(f"❌ Критическая ошибка при переходе на страницу {page_number}: {e}")
+            return False
 
     def wait_and_parse_page(self):
         """Ждет загрузки страницы и парсит номера с ID"""
