@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import EMAIL, PASSWORD, HEADLESS_MODE, base_path, PHONE_PREFIX
+from config import EMAIL, PASSWORD, HEADLESS_MODE, base_path, PHONE_PREFIX, ENABLE_2FA
 from enum import Enum
 from pynput.keyboard import Key, Controller as KeyboardController
 from pynput import mouse
@@ -94,21 +94,31 @@ class AutoTelegramSender:
             with open(PHONE_NUMBERS_FILE, 'w', encoding='utf-8') as file:
                 for line in lines:
                     if clean_number in line:
-                        # ИСПРАВЛЕНИЕ: ищем паттерн "номер ID: число"
-                        pattern = rf'({re.escape(clean_number)}\s+ID:\s+\d+)'
-                        match = re.search(pattern, line)
-
-                        if match:
-                            # Берем номер + ID полностью
-                            base_part = match.group(1)
-                            # Берем префикс до номера (например "1. ")
-                            prefix = line[:match.start()].strip()
-
-                            # Формируем полную базовую часть
-                            full_base = f"{prefix} {base_part}".strip()
-                        else:
-                            # Fallback: используем старый метод
-                            full_base = line.split()[0] + " " + clean_number
+                        # Берем префикс до номера (например "1. ")
+                        prefix_match = re.search(r'^(\d+\.)', line)
+                        prefix = prefix_match.group(1) if prefix_match else ""
+                        
+                        # Извлекаем 2FA код из исходной строки (если есть)
+                        two_fa_match = re.search(r'2FA:\s+([A-Za-z0-9]+)', line)
+                        two_fa_code = two_fa_match.group(1) if two_fa_match else None
+                        
+                        # Извлекаем ID из исходной строки (если есть)
+                        id_match = re.search(r'ID:\s+(\d+)', line)
+                        order_id = id_match.group(1) if id_match else None
+                        
+                        # Формируем базовую часть: номер
+                        base_part = clean_number
+                        
+                        # Добавляем 2FA, если есть
+                        if two_fa_code:
+                            base_part += f" 2FA: {two_fa_code}"
+                        
+                        # Добавляем ID, если есть
+                        if order_id:
+                            base_part += f" ID: {order_id}"
+                        
+                        # Формируем полную строку с префиксом
+                        full_base = f"{prefix} {base_part}".strip() if prefix else base_part
 
                         # Добавляем статус и OTP код
                         if status == PhoneStatus.PROCESSED and otp_code:
@@ -178,11 +188,23 @@ class AutoTelegramSender:
                         phone_match = re.search(rf'\+{PHONE_PREFIX}\d+', line)
                         if phone_match:
                             number = phone_match.group()
+                            
+                            # Извлекаем 2FA код, если он есть (формат: номер 2FA: код ID: id)
+                            two_fa_code = None
+                            if ENABLE_2FA:
+                                two_fa_match = re.search(rf'{re.escape(number)}\s+2FA:\s+([A-Za-z0-9]+)', line)
+                                if two_fa_match:
+                                    two_fa_code = two_fa_match.group(1).strip()
+                            
                             unprocessed_numbers.append({
                                 'number': number,
-                                'page': self.current_page
+                                'page': self.current_page,
+                                '2fa': two_fa_code
                             })
-                            print(f"📱 Найден необработанный номер: {number} (Страница {self.current_page})")
+                            if two_fa_code:
+                                print(f"📱 Найден необработанный номер: {number} с 2FA (Страница {self.current_page})")
+                            else:
+                                print(f"📱 Найден необработанный номер: {number} (Страница {self.current_page})")
 
             print(f"✅ Найдено {len(unprocessed_numbers)} необработанных номеров")
             return unprocessed_numbers
@@ -483,7 +505,7 @@ class AutoTelegramSender:
         print(f"⏰ Тайм-аут после {checks_made} проверок ({timeout}с)")
         return False
 
-    def copy_otp_code_with_timeout(self, phone_number, timeout=30):
+    def copy_otp_code_with_timeout(self, phone_number, timeout=30, two_fa_code=None):
         """Копирование OTP кода с ожиданием в течение заданного времени"""
         start_time = time.time()
         check_count = 0
@@ -532,13 +554,28 @@ class AutoTelegramSender:
                         self.keyboard.type(otp_code)
                         print(f"📱 OTP код введен в Telegram: {otp_code}")
 
-                        # Ждем подтверждения принятия OTP с тайм-аутом
-                        if self.wait_for_otp_acceptance(timeout=30):
-                            print("✅ OTP успешно принят Telegram!")
-                            return otp_code
+                        # Если есть 2FA код, вводим его сразу после OTP, и только потом проверяем принятие
+                        if ENABLE_2FA and two_fa_code:
+                            print(f"🔐 Найден 2FA код, вводим после OTP...")
+                            if self.enter_2fa_code(two_fa_code):
+                                # После ввода 2FA проверяем принятие OTP/2FA
+                                if self.wait_for_otp_acceptance(timeout=30):
+                                    print("✅ OTP и 2FA успешно приняты Telegram!")
+                                    return otp_code
+                                else:
+                                    print("❌ OTP/2FA не приняты за 30 секунд")
+                                    return None
+                            else:
+                                print("❌ Не удалось ввести 2FA код")
+                                return None
                         else:
-                            print("❌ OTP не принят за 30 секунд")
-                            return None
+                            # Если нет 2FA, проверяем принятие OTP как обычно
+                            if self.wait_for_otp_acceptance(timeout=30):
+                                print("✅ OTP успешно принят Telegram!")
+                                return otp_code
+                            else:
+                                print("❌ OTP не принят за 30 секунд")
+                                return None
                     else:
                         # OTP код еще не появился, ждем и проверяем снова
                         time.sleep(1)  # Проверяем каждую секунду
@@ -556,6 +593,35 @@ class AutoTelegramSender:
         # Время истекло
         print(f"⏰ Тайм-аут ожидания OTP кода ({timeout}с). Код не появился для номера {phone_number}")
         return None
+
+    def enter_2fa_code(self, two_fa_code):
+        """Ввод 2FA кода в Telegram после успешного принятия OTP"""
+        try:
+            if not ENABLE_2FA or not two_fa_code:
+                return False
+            
+            print(f"🔐 Ввод 2FA кода: {two_fa_code}")
+            
+            # Небольшая пауза перед вводом 2FA
+            time.sleep(2)
+            
+            # Вводим 2FA код
+            self.keyboard.type(two_fa_code)
+            print(f"📱 2FA код введен в Telegram: {two_fa_code}")
+            
+            # Нажимаем Enter для подтверждения
+            time.sleep(0.5)
+            self.keyboard.press(Key.enter)
+            self.keyboard.release(Key.enter)
+            print("✅ Enter нажат после ввода 2FA кода")
+            
+            # Ждем немного для обработки
+            time.sleep(2)
+            
+            return True
+        except Exception as e:
+            print(f"❌ Ошибка при вводе 2FA кода: {e}")
+            return False
 
     def close_telegram(self):
         """Закрытие Telegram с проверкой завершения процесса"""
@@ -726,7 +792,13 @@ class AutoTelegramSender:
                 time.sleep(1)
                 continue
 
-            otp_code = self.copy_otp_code_with_timeout(phone_number, timeout=30)
+            # Получаем 2FA код для передачи в метод copy_otp_code_with_timeout
+            two_fa_code = phone_data.get('2fa')
+            
+            # Вызываем метод с передачей 2FA кода (если есть)
+            # Метод сам обработает ввод 2FA и проверку принятия после ввода 2FA
+            otp_code = self.copy_otp_code_with_timeout(phone_number, timeout=30, two_fa_code=two_fa_code)
+            
             if otp_code and otp_code.strip().upper() == 'NOCODE':
                 self.mark_number_as_nocode(phone_number)
                 failed_processes += 1
