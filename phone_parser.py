@@ -12,6 +12,147 @@ from webdriver_manager.chrome import ChromeDriverManager
 from config import *  # Импортируем все настройки из config.py
 
 
+def extract_2fa_code_from_row(row):
+    """Извлекает 2FA код из строки таблицы (через Selenium)"""
+    try:
+        if not ENABLE_2FA:
+            return None
+        
+        # Способ 1: Ищем все tooltip-text элементы в строке
+        tooltip_elements = row.find_elements(By.CSS_SELECTOR, "span.tooltip-text")
+        
+        for tooltip in tooltip_elements:
+            # Пробуем получить текст разными способами (для скрытых элементов)
+            try:
+                tooltip_text = tooltip.text.strip()
+            except:
+                try:
+                    tooltip_text = tooltip.get_attribute("textContent").strip()
+                except:
+                    try:
+                        tooltip_text = tooltip.get_attribute("innerText").strip()
+                    except:
+                        continue
+            
+            # Проверяем, содержит ли tooltip текст "2FA:"
+            if tooltip_text and tooltip_text.startswith("2FA:"):
+                # Извлекаем код после "2FA:"
+                two_fa_code = tooltip_text.replace("2FA:", "").strip()
+                if two_fa_code:
+                    return two_fa_code
+        
+        # Способ 2: Ищем кнопку с иконкой shield-check и извлекаем tooltip из её контейнера
+        try:
+            # Ищем кнопки с иконкой shield-check
+            shield_buttons = row.find_elements(By.CSS_SELECTOR, "i.mdi-shield-check")
+            for icon in shield_buttons:
+                # Находим родительский tooltip-container
+                try:
+                    tooltip_container = icon.find_element(By.XPATH, "./ancestor::div[contains(@class, 'tooltip-container')]")
+                    if tooltip_container:
+                        tooltip = tooltip_container.find_element(By.CSS_SELECTOR, "span.tooltip-text")
+                        # Пробуем получить текст разными способами
+                        try:
+                            tooltip_text = tooltip.text.strip()
+                        except:
+                            try:
+                                tooltip_text = tooltip.get_attribute("textContent").strip()
+                            except:
+                                try:
+                                    tooltip_text = tooltip.get_attribute("innerText").strip()
+                                except:
+                                    continue
+                        
+                        if tooltip_text and tooltip_text.startswith("2FA:"):
+                            two_fa_code = tooltip_text.replace("2FA:", "").strip()
+                            if two_fa_code:
+                                return two_fa_code
+                except:
+                    # Пробуем найти tooltip через родительскую кнопку
+                    try:
+                        button = icon.find_element(By.XPATH, "./ancestor::button")
+                        tooltip_container = button.find_element(By.XPATH, "./following-sibling::span[contains(@class, 'tooltip-text')] | ./parent::div//span[contains(@class, 'tooltip-text')]")
+                        if tooltip_container:
+                            tooltip_text = tooltip_container.get_attribute("textContent") or tooltip_container.text
+                            if tooltip_text and tooltip_text.strip().startswith("2FA:"):
+                                two_fa_code = tooltip_text.strip().replace("2FA:", "").strip()
+                                if two_fa_code:
+                                    return two_fa_code
+                    except:
+                        pass
+        except Exception:
+            pass
+        
+        # Способ 3: Используем JavaScript для получения innerHTML строки (для скрытых элементов)
+        try:
+            row_html = row.get_attribute("innerHTML")
+            if row_html:
+                # Ищем 2FA код в HTML через регулярное выражение
+                two_fa_match = re.search(r'2FA:\s*([A-Za-z0-9]{10,20})', row_html, re.IGNORECASE)
+                if two_fa_match:
+                    return two_fa_match.group(1).strip()
+        except Exception:
+            pass
+        
+        # Способ 4: Ищем любой текст, содержащий "2FA:" в строке
+        try:
+            row_text = row.text
+            if "2FA:" in row_text:
+                # Извлекаем код после "2FA:"
+                match = re.search(r'2FA:\s*([A-Za-z0-9]+)', row_text)
+                if match:
+                    return match.group(1).strip()
+        except Exception:
+            pass
+            
+    except Exception as e:
+        # Тихий провал - не все номера имеют 2FA
+        pass
+    
+    return None
+
+
+def extract_2fa_code_from_html(row_html):
+    """Извлекает 2FA код из HTML строки таблицы"""
+    try:
+        if not ENABLE_2FA:
+            return None
+        
+        # Способ 1: Ищем tooltip-text элемент, содержащий "2FA:"
+        # Паттерн: <span class="tooltip-text">2FA: код</span>
+        two_fa_pattern = r'<span\s+class=["\']tooltip-text["\']>2FA:\s*([^<]+)</span>'
+        two_fa_match = re.search(two_fa_pattern, row_html, re.IGNORECASE | re.DOTALL)
+        
+        if two_fa_match:
+            two_fa_code = two_fa_match.group(1).strip()
+            if two_fa_code:
+                return two_fa_code
+        
+        # Способ 2: Ищем внутри tooltip-container с кнопкой shield-check
+        # Ищем структуру: <div class="tooltip-container">...<i class="mdi mdi-shield-check">...<span class="tooltip-text">2FA: код</span>
+        tooltip_container_pattern = r'<div[^>]*class=["\'][^"\']*tooltip-container[^"\']*["\'][^>]*>.*?<i[^>]*class=["\'][^"\']*mdi-shield-check[^"\']*["\'][^>]*>.*?<span[^>]*class=["\']tooltip-text["\'][^>]*>2FA:\s*([^<]+)</span>'
+        two_fa_match = re.search(tooltip_container_pattern, row_html, re.IGNORECASE | re.DOTALL)
+        
+        if two_fa_match:
+            two_fa_code = two_fa_match.group(1).strip()
+            if two_fa_code:
+                return two_fa_code
+        
+        # Способ 3: Ищем любой текст "2FA: код" в строке (более гибкий поиск)
+        two_fa_pattern_general = r'2FA:\s*([A-Za-z0-9]{10,20})'
+        two_fa_match = re.search(two_fa_pattern_general, row_html, re.IGNORECASE)
+        
+        if two_fa_match:
+            two_fa_code = two_fa_match.group(1).strip()
+            if two_fa_code:
+                return two_fa_code
+                
+    except Exception:
+        pass
+    
+    return None
+
+
 class PhoneNumberParser:
     def __init__(self):
         """Инициализация парсера с настройкой Selenium"""
@@ -240,9 +381,13 @@ class PhoneNumberParser:
                             # Очищаем номер от возможных пробелов
                             phone_number = re.sub(r'[^\d\+]', '', phone_text)
                             if phone_number.startswith(PHONE_PREFIX):
+                                # Извлекаем 2FA код, если включен парсинг 2FA
+                                two_fa_code = extract_2fa_code_from_row(row) if ENABLE_2FA else None
+                                
                                 phone_data.append({
                                     'number': phone_number,
-                                    'id': order_id
+                                    'id': order_id,
+                                    '2fa': two_fa_code
                                 })
                                 used_numbers.add(phone_number)
                                 break  # Нашли номер для этой строки
@@ -301,9 +446,13 @@ class PhoneNumberParser:
 
             # Проверяем, что номер начинается с нужного префикса и не дублируется
             if phone_number.startswith(PHONE_PREFIX) and phone_number not in used_numbers:
+                # Извлекаем 2FA код, если включен парсинг 2FA
+                two_fa_code = extract_2fa_code_from_html(row_html) if ENABLE_2FA else None
+                
                 phone_data.append({
                     'number': phone_number,
-                    'id': order_id
+                    'id': order_id,
+                    '2fa': two_fa_code
                 })
                 used_numbers.add(phone_number)
 
@@ -326,7 +475,13 @@ class PhoneNumberParser:
                         f.write('\n')
                     f.write(f"=== Страница {page} ===\n")
                     page += 1
-                f.write(f"{i}. {data['number']} ID: {data['id']}\n")
+                
+                # Формируем строку с номером, 2FA (если есть) и ID
+                line = f"{i}. {data['number']}"
+                if ENABLE_2FA and data.get('2fa'):
+                    line += f" 2FA: {data['2fa']}"
+                line += f" ID: {data['id']}"
+                f.write(line + '\n')
         print(f"✅ Результаты сохранены в {txt_path}")
 
     def close(self):
